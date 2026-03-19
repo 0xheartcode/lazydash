@@ -10,12 +10,14 @@ import (
 )
 
 type Model struct {
-	columns []api.Column
-	colIdx  int
-	cardIdx int
-	width   int
-	height  int
-	active  bool
+	columns  []api.Column
+	colIdx   int
+	cardIdx  int
+	width    int
+	height   int
+	active   bool
+	views    []api.ProjectView
+	viewIdx  int
 }
 
 func New() Model {
@@ -26,6 +28,11 @@ func (m *Model) SetColumns(cols []api.Column) {
 	m.columns = cols
 	m.colIdx = 0
 	m.cardIdx = 0
+}
+
+func (m *Model) SetViews(views []api.ProjectView, idx int) {
+	m.views = views
+	m.viewIdx = idx
 }
 
 func (m *Model) SetSize(w, h int) { m.width = w; m.height = h }
@@ -88,6 +95,10 @@ func (m Model) View() string {
 		return border.Width(m.width - 2).Height(m.height - 2).Render(content)
 	}
 
+	// View tab bar (1 line) + separator (1 line) = 2 lines overhead.
+	tabBar := m.renderTabBar(innerW)
+	colsH := innerH - 2
+
 	colWidth := innerW / len(m.columns)
 	if colWidth < 14 {
 		colWidth = 14
@@ -95,18 +106,49 @@ func (m Model) View() string {
 
 	cols := make([]string, len(m.columns))
 	for i, col := range m.columns {
-		active := i == m.colIdx
-		cols[i] = renderColumn(col, active, m.cardIdx, colWidth, innerH)
+		cols[i] = renderColumn(col, i == m.colIdx, m.cardIdx, colWidth, colsH)
 	}
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+	columnsRow := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+	content := lipgloss.JoinVertical(lipgloss.Left, tabBar, columnsRow)
 	return border.Width(m.width - 2).Height(m.height - 2).Render(content)
+}
+
+func (m Model) renderTabBar(width int) string {
+	if len(m.views) <= 1 {
+		// Single view — just show its name as a plain header.
+		name := ""
+		if len(m.views) == 1 {
+			name = m.views[0].Name
+		}
+		return theme.Subtitle.Width(width).Render(name)
+	}
+
+	var tabs []string
+	for i, v := range m.views {
+		label := " " + v.Name + " "
+		if i == m.viewIdx {
+			tabs = append(tabs, theme.CardSelected.
+				Background(theme.ColorBg).
+				Underline(true).
+				Render(label))
+		} else {
+			tabs = append(tabs, theme.Muted.Render(label))
+		}
+	}
+
+	bar := strings.Join(tabs, theme.Muted.Render("│"))
+	hint := theme.Muted.Render("  [ / ] switch")
+	gap := width - lipgloss.Width(bar) - lipgloss.Width(hint)
+	if gap < 0 {
+		gap = 0
+	}
+	return bar + strings.Repeat(" ", gap) + hint
 }
 
 func renderColumn(col api.Column, active bool, selectedCard, width, height int) string {
 	cardW := width - 2
 
-	// Header
 	header := theme.ColumnHeader.Width(cardW).Render(
 		truncate(col.Name, cardW) + fmt.Sprintf(" (%d)", len(col.Cards)),
 	)
@@ -118,8 +160,8 @@ func renderColumn(col api.Column, active bool, selectedCard, width, height int) 
 		if len(lines)-1 >= maxCards {
 			break
 		}
-		var line string
 		name := truncate(card.Title, cardW-3)
+		var line string
 		if active && i == selectedCard {
 			line = theme.CardCursor.Render("> ") + theme.CardSelected.Render(name)
 		} else {
@@ -132,15 +174,11 @@ func renderColumn(col api.Column, active bool, selectedCard, width, height int) 
 		lines = append(lines, theme.Muted.Render("  empty"))
 	}
 
-	// Pad
 	for len(lines) < height-1 {
 		lines = append(lines, "")
 	}
 
-	colStyle := lipgloss.NewStyle().
-		Width(width).
-		PaddingRight(1)
-
+	colStyle := lipgloss.NewStyle().Width(width).PaddingRight(1)
 	if active {
 		colStyle = colStyle.BorderRight(true).
 			BorderStyle(lipgloss.NormalBorder()).

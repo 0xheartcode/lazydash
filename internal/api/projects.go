@@ -18,7 +18,7 @@ type Project struct {
 	Closed      bool
 }
 
-// Column is a status column on a project board.
+// Column is a named group of cards on a board view.
 type Column struct {
 	Name  string
 	Cards []Card
@@ -36,6 +36,115 @@ type Card struct {
 	Assignees []string
 	Status    string
 	Body      string
+}
+
+// ProjectView mirrors a saved view from GitHub Projects v2.
+type ProjectView struct {
+	ID           string
+	Name         string
+	Layout       string // BOARD_LAYOUT | TABLE_LAYOUT | ROADMAP_LAYOUT
+	GroupByField string // name of the single-select field used for columns
+}
+
+// SelectField is a single-select field with ordered options.
+type SelectField struct {
+	ID      string
+	Name    string
+	Options []string // ordered option names
+}
+
+// RawItem is an ungrouped project item with all its field values.
+type RawItem struct {
+	ID          string
+	Type        string
+	IsArchived  bool
+	Number      int
+	Title       string
+	State       string
+	URL         string
+	Repo        string
+	Assignees   []string
+	Body        string
+	FieldValues map[string]string // field name → selected option name
+}
+
+// BoardData holds everything fetched from a project in one call.
+// Grouping into columns is done client-side via GroupByField.
+type BoardData struct {
+	Views  []ProjectView
+	Fields []SelectField
+	Items  []RawItem
+}
+
+// GroupByField buckets RawItems into Columns using the named single-select field.
+// Column order follows the field's option order. Falls back to "No <field>" bucket.
+func GroupByField(data *BoardData, fieldName string) []Column {
+	// Find the field's ordered options.
+	var options []string
+	for _, f := range data.Fields {
+		if f.Name == fieldName {
+			options = f.Options
+			break
+		}
+	}
+	noGroup := "No " + fieldName
+	if len(options) == 0 {
+		options = []string{noGroup}
+	}
+
+	buckets := make(map[string][]Card, len(options)+1)
+	for _, opt := range options {
+		buckets[opt] = nil
+	}
+
+	for _, item := range data.Items {
+		if item.IsArchived {
+			continue
+		}
+		card := Card{
+			ID:        item.ID,
+			Type:      item.Type,
+			Number:    item.Number,
+			Title:     item.Title,
+			State:     item.State,
+			URL:       item.URL,
+			Repo:      item.Repo,
+			Assignees: item.Assignees,
+			Body:      item.Body,
+		}
+
+		val := item.FieldValues[fieldName]
+		if val == "" {
+			val = noGroup
+		}
+		card.Status = val
+
+		if _, ok := buckets[val]; ok {
+			buckets[val] = append(buckets[val], card)
+		} else {
+			buckets[noGroup] = append(buckets[noGroup], card)
+		}
+	}
+
+	columns := make([]Column, 0, len(options))
+	for _, opt := range options {
+		columns = append(columns, Column{Name: opt, Cards: buckets[opt]})
+	}
+	// Append the no-group bucket only if it has cards.
+	if cards := buckets[noGroup]; len(cards) > 0 {
+		// Avoid duplicate if noGroup was already an option.
+		found := false
+		for _, opt := range options {
+			if opt == noGroup {
+				found = true
+				break
+			}
+		}
+		if !found {
+			columns = append(columns, Column{Name: noGroup, Cards: cards})
+		}
+	}
+	return columns
 }
 
 // Client wraps the go-gh GraphQL client.
@@ -147,14 +256,29 @@ func (c *Client) ListOrgProjects(org string) ([]Project, error) {
 	return projects, nil
 }
 
-// GetProjectBoard fetches all items for a project and groups them by Status.
-func (c *Client) GetProjectBoard(projectID string) ([]Column, error) {
+// GetProjectBoard fetches views, fields, and all items for a project.
+// Use GroupByField to render a specific view's columns.
+func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 	var q struct {
 		Node struct {
 			Project struct {
+				Views struct {
+					Nodes []struct {
+						ID     string
+						Name   string
+						Layout string
+						GroupByFields struct {
+							Nodes []struct {
+								AsSelectField struct {
+									Name string
+								} `graphql:"... on ProjectV2SingleSelectField"`
+							}
+						} `graphql:"groupByFields(first: 5)"`
+					}
+				} `graphql:"views(first: 20)"`
 				Fields struct {
 					Nodes []struct {
-						SingleSelectField struct {
+						AsSelectField struct {
 							ID      string
 							Name    string
 							Options []struct {
@@ -204,8 +328,10 @@ func (c *Client) GetProjectBoard(projectID string) ([]Column, error) {
 								SingleSelectValue struct {
 									Name  string
 									Field struct {
-										Name string
-									} `graphql:"... on ProjectV2SingleSelectField"`
+										AsSelectField struct {
+											Name string
+										} `graphql:"... on ProjectV2SingleSelectField"`
+									}
 								} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
 							}
 						} `graphql:"fieldValues(first: 20)"`
@@ -222,77 +348,86 @@ func (c *Client) GetProjectBoard(projectID string) ([]Column, error) {
 		return nil, err
 	}
 
-	// Find the Status single-select field and its ordered options.
-	var statusOptions []string
+	// Build SelectFields map.
+	var fields []SelectField
 	for _, f := range q.Node.Project.Fields.Nodes {
-		if f.SingleSelectField.Name == "Status" {
-			for _, opt := range f.SingleSelectField.Options {
-				statusOptions = append(statusOptions, opt.Name)
-			}
-			break
-		}
-	}
-	if len(statusOptions) == 0 {
-		statusOptions = []string{"No Status"}
-	}
-
-	// Bucket cards by status.
-	buckets := make(map[string][]Card, len(statusOptions))
-	for _, opt := range statusOptions {
-		buckets[opt] = nil
-	}
-
-	for _, item := range q.Node.Project.Items.Nodes {
-		if item.IsArchived {
+		sf := f.AsSelectField
+		if sf.Name == "" {
 			continue
 		}
-		card := Card{ID: item.ID, Type: item.Type}
-		switch item.Type {
-		case "ISSUE":
-			card.Number = item.Content.AsIssue.Number
-			card.Title = item.Content.AsIssue.Title
-			card.State = item.Content.AsIssue.State
-			card.URL = item.Content.AsIssue.URL
-			card.Repo = item.Content.AsIssue.Repository.NameWithOwner
-			for _, a := range item.Content.AsIssue.Assignees.Nodes {
-				card.Assignees = append(card.Assignees, "@"+a.Login)
-			}
-		case "PULL_REQUEST":
-			card.Number = item.Content.AsPullRequest.Number
-			card.Title = item.Content.AsPullRequest.Title
-			card.State = item.Content.AsPullRequest.State
-			card.URL = item.Content.AsPullRequest.URL
-			card.Repo = item.Content.AsPullRequest.Repository.NameWithOwner
-			for _, a := range item.Content.AsPullRequest.Assignees.Nodes {
-				card.Assignees = append(card.Assignees, "@"+a.Login)
-			}
-		case "DRAFT_ISSUE":
-			card.Title = item.Content.AsDraftIssue.Title
-			card.Body = item.Content.AsDraftIssue.Body
+		field := SelectField{ID: sf.ID, Name: sf.Name}
+		for _, opt := range sf.Options {
+			field.Options = append(field.Options, opt.Name)
 		}
+		fields = append(fields, field)
+	}
 
-		// Find status from fieldValues.
-		status := "No Status"
-		for _, fv := range item.FieldValues.Nodes {
-			if fv.SingleSelectValue.Field.Name == "Status" && fv.SingleSelectValue.Name != "" {
-				status = fv.SingleSelectValue.Name
+	// Build views, resolving groupByField name.
+	var views []ProjectView
+	for _, v := range q.Node.Project.Views.Nodes {
+		pv := ProjectView{
+			ID:     v.ID,
+			Name:   v.Name,
+			Layout: v.Layout,
+		}
+		// Use the first groupByField as the column grouping field.
+		for _, gf := range v.GroupByFields.Nodes {
+			if gf.AsSelectField.Name != "" {
+				pv.GroupByField = gf.AsSelectField.Name
 				break
 			}
 		}
-		card.Status = status
+		// Only include board views that have a groupByField,
+		// or fall back gracefully for other layouts.
+		views = append(views, pv)
+	}
 
-		if _, ok := buckets[status]; ok {
-			buckets[status] = append(buckets[status], card)
-		} else {
-			buckets["No Status"] = append(buckets["No Status"], card)
+	// If no views returned, synthesise a default "Board" view grouped by Status.
+	if len(views) == 0 {
+		views = []ProjectView{{Name: "Board", Layout: "BOARD_LAYOUT", GroupByField: "Status"}}
+	}
+
+	// Build raw items.
+	var items []RawItem
+	for _, item := range q.Node.Project.Items.Nodes {
+		ri := RawItem{
+			ID:          item.ID,
+			Type:        item.Type,
+			IsArchived:  item.IsArchived,
+			FieldValues: make(map[string]string),
 		}
+		switch item.Type {
+		case "ISSUE":
+			ri.Number = item.Content.AsIssue.Number
+			ri.Title = item.Content.AsIssue.Title
+			ri.State = item.Content.AsIssue.State
+			ri.URL = item.Content.AsIssue.URL
+			ri.Repo = item.Content.AsIssue.Repository.NameWithOwner
+			for _, a := range item.Content.AsIssue.Assignees.Nodes {
+				ri.Assignees = append(ri.Assignees, "@"+a.Login)
+			}
+		case "PULL_REQUEST":
+			ri.Number = item.Content.AsPullRequest.Number
+			ri.Title = item.Content.AsPullRequest.Title
+			ri.State = item.Content.AsPullRequest.State
+			ri.URL = item.Content.AsPullRequest.URL
+			ri.Repo = item.Content.AsPullRequest.Repository.NameWithOwner
+			for _, a := range item.Content.AsPullRequest.Assignees.Nodes {
+				ri.Assignees = append(ri.Assignees, "@"+a.Login)
+			}
+		case "DRAFT_ISSUE":
+			ri.Title = item.Content.AsDraftIssue.Title
+			ri.Body = item.Content.AsDraftIssue.Body
+		}
+		for _, fv := range item.FieldValues.Nodes {
+			fieldName := fv.SingleSelectValue.Field.AsSelectField.Name
+			val := fv.SingleSelectValue.Name
+			if fieldName != "" && val != "" {
+				ri.FieldValues[fieldName] = val
+			}
+		}
+		items = append(items, ri)
 	}
 
-	// Build columns in the order defined by status options.
-	columns := make([]Column, 0, len(statusOptions))
-	for _, opt := range statusOptions {
-		columns = append(columns, Column{Name: opt, Cards: buckets[opt]})
-	}
-	return columns, nil
+	return &BoardData{Views: views, Fields: fields, Items: items}, nil
 }
-

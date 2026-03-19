@@ -28,7 +28,7 @@ const (
 // --- Messages ---
 
 type projectsLoadedMsg struct{ projects []api.Project }
-type boardLoadedMsg struct{ columns []api.Column }
+type boardLoadedMsg struct{ data *api.BoardData }
 type errMsg struct{ err error }
 type clientReadyMsg struct {
 	login  string
@@ -51,11 +51,13 @@ type Model struct {
 	err     error
 	status  string
 
-	login    string
-	projects projectlist.Model
-	board    board.Model
-	sidebar  sidebar.Model
-	footer   footer.Model
+	login     string
+	projects  projectlist.Model
+	board     board.Model
+	sidebar   sidebar.Model
+	footer    footer.Model
+	boardData *api.BoardData
+	viewIdx   int
 
 	showHelp bool
 }
@@ -128,7 +130,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case boardLoadedMsg:
 		m.loading = false
 		m.status = ""
-		m.board.SetColumns(msg.columns)
+		m.boardData = msg.data
+		m.viewIdx = 0
+		m.applyView(0)
 		m.sidebar.SetCard(nil)
 		m.active = paneBoard
 		m.syncActivePane()
@@ -150,6 +154,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// applyView groups board items by the view at idx and pushes columns to the board component.
+func (m *Model) applyView(idx int) {
+	if m.boardData == nil || len(m.boardData.Views) == 0 {
+		return
+	}
+	if idx < 0 || idx >= len(m.boardData.Views) {
+		return
+	}
+	m.viewIdx = idx
+	view := m.boardData.Views[idx]
+
+	fieldName := view.GroupByField
+	if fieldName == "" {
+		fieldName = "Status" // fallback for non-board views
+	}
+
+	cols := api.GroupByField(m.boardData, fieldName)
+	m.board.SetColumns(cols)
+	m.board.SetViews(m.boardData.Views, idx)
+}
+
 func (m *Model) layout() {
 	projectW := m.width * 20 / 100
 	if projectW < 18 {
@@ -161,7 +186,7 @@ func (m *Model) layout() {
 	}
 	boardW := m.width - projectW - sidebarW
 
-	contentH := m.height - 2 // 2 for footer line + padding
+	contentH := m.height - 2
 
 	m.projects.SetSize(projectW, contentH)
 	m.board.SetSize(boardW, contentH)
@@ -187,7 +212,6 @@ func (m *Model) syncActivePane() {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 
-	// Global keys
 	switch k {
 	case m.keys.Quit:
 		return m, tea.Quit
@@ -211,7 +235,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Pane-local keys
 	switch m.active {
 	case paneProjects:
 		return m.handleProjectsKey(k)
@@ -250,6 +273,14 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 		m.board.MoveLeft()
 	case m.keys.Right:
 		m.board.MoveRight()
+	case "[":
+		if m.boardData != nil && m.viewIdx > 0 {
+			m.applyView(m.viewIdx - 1)
+		}
+	case "]":
+		if m.boardData != nil && m.viewIdx < len(m.boardData.Views)-1 {
+			m.applyView(m.viewIdx + 1)
+		}
 	case m.keys.Enter:
 		if card := m.board.SelectedCard(); card != nil {
 			m.sidebar.SetCard(card)
@@ -346,6 +377,7 @@ func (m Model) helpView() string {
 		theme.HelpKey.Render("  tab / shift+tab") + "  " + theme.HelpDesc.Render("cycle panes"),
 		theme.HelpKey.Render("  j / k          ") + "  " + theme.HelpDesc.Render("move up/down"),
 		theme.HelpKey.Render("  h / l          ") + "  " + theme.HelpDesc.Render("move left/right (board columns)"),
+		theme.HelpKey.Render("  [ / ]          ") + "  " + theme.HelpDesc.Render("switch project views"),
 		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("select / open"),
 		"",
 		theme.HelpKey.Render("Actions"),
@@ -413,11 +445,10 @@ func fetchBoardCmd(projectID string, client *api.Client) tea.Cmd {
 		if client == nil {
 			return errMsg{fmt.Errorf("client not initialized")}
 		}
-		columns, err := client.GetProjectBoard(projectID)
+		data, err := client.GetProjectBoard(projectID)
 		if err != nil {
 			return errMsg{err}
 		}
-		return boardLoadedMsg{columns}
+		return boardLoadedMsg{data}
 	}
 }
-
