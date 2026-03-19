@@ -54,6 +54,18 @@ func GhDashInstallHint() string {
 	return "gh extension install dlvhdr/gh-dash"
 }
 
+// Truncate shortens s to at most n runes, appending "…" if truncated.
+func Truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n-1]) + "…"
+}
+
 // IsAuthError returns true if the error looks like a GitHub auth failure,
 // so callers can show a friendly "run gh auth login" message.
 func IsAuthError(err error) bool {

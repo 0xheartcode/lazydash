@@ -6,6 +6,7 @@ import (
 
 	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
+	"github.com/0xheartcode/lazydash/internal/utils"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -24,9 +25,10 @@ type Model struct {
 	cardIdx int
 
 	// table mode
-	tableItems  []api.Card
-	tableRow    int
-	tableScroll int
+	tableItems    []api.Card
+	tableRow      int
+	tableScroll   int
+	visibleFields []api.VisibleField
 }
 
 func New() Model { return Model{layout: "BOARD_LAYOUT"} }
@@ -49,6 +51,8 @@ func (m *Model) SetTableItems(items []api.Card) {
 	m.tableRow = 0
 	m.tableScroll = 0
 }
+
+func (m *Model) SetVisibleFields(fields []api.VisibleField) { m.visibleFields = fields }
 
 // --- Navigation ---
 
@@ -156,27 +160,63 @@ func (m Model) tableVisibleRows() int {
 	return h
 }
 
+// tableColDef describes a dynamic column in table mode.
+type tableColDef struct {
+	name     string
+	dataType string
+}
+
+func (m Model) tableColumns() (cols []tableColDef, showAssignees bool) {
+	if len(m.visibleFields) == 0 {
+		// Default fallback: Status + Assignees.
+		return []tableColDef{{name: "Status", dataType: "SINGLE_SELECT"}}, true
+	}
+	for _, vf := range m.visibleFields {
+		switch vf.DataType {
+		case "TITLE":
+			// always rendered as first column
+		case "ASSIGNEES", "REVIEWERS":
+			showAssignees = true
+		case "REPOSITORY":
+			cols = append(cols, tableColDef{name: "Repo", dataType: vf.DataType})
+		default:
+			cols = append(cols, tableColDef{name: vf.Name, dataType: vf.DataType})
+		}
+	}
+	return cols, showAssignees
+}
+
 func (m Model) renderTable(innerW, innerH int) string {
 	tabBar := m.renderTabBar(innerW)
 
-	statusW := 14
-	assignW := 14
-	numW := 5
-	iconW := 2
-	cursorW := 2
-	titleW := innerW - cursorW - iconW - numW - 1 - statusW - 1 - assignW
+	const cursorW, iconW, numW, colW = 2, 2, 5, 12
+
+	midCols, showAssignees := m.tableColumns()
+
+	assignW := 0
+	if showAssignees {
+		assignW = 14
+	}
+	fixed := cursorW + iconW + (numW + 1)
+	extras := len(midCols)*(colW+1) + assignW
+	titleW := innerW - fixed - extras
 	if titleW < 10 {
 		titleW = 10
 	}
 
 	sep := theme.Muted.Render(strings.Repeat("─", innerW))
-	header := lipgloss.JoinHorizontal(lipgloss.Top,
+	headerParts := []string{
 		strings.Repeat(" ", cursorW+iconW),
-		theme.Subtitle.Width(numW+1).Render("#"),
+		theme.Subtitle.Width(numW + 1).Render("#"),
 		theme.Subtitle.Width(titleW).Render("Title"),
-		theme.Subtitle.Width(statusW+1).Render("Status"),
-		theme.Subtitle.Width(assignW).Render("Assigned"),
-	)
+	}
+	for _, c := range midCols {
+		headerParts = append(headerParts, theme.Subtitle.Width(colW+1).Render(c.name))
+	}
+	if showAssignees {
+		headerParts = append(headerParts, theme.Subtitle.Width(assignW).Render("Assigned"))
+	}
+	header := lipgloss.JoinHorizontal(lipgloss.Top, headerParts...)
 
 	lines := []string{tabBar, header, sep}
 
@@ -208,7 +248,7 @@ func (m Model) renderTable(innerW, innerH int) string {
 			num = strings.Repeat(" ", numW+1)
 		}
 
-		title := truncate(card.Title, titleW)
+		title := utils.Truncate(card.Title, titleW)
 		var titleStr string
 		if i == m.tableRow {
 			titleStr = theme.CardSelected.Width(titleW).Render(title)
@@ -216,18 +256,30 @@ func (m Model) renderTable(innerW, innerH int) string {
 			titleStr = theme.CardTitle.Width(titleW).Render(title)
 		}
 
-		statusStr := lipgloss.NewStyle().Width(statusW + 1).Render(
-			statusBadge(card.Status, statusW),
-		)
-
-		assignStr := ""
-		if len(card.Assignees) > 0 {
-			assignStr = truncate(strings.Join(card.Assignees, " "), assignW)
+		rowParts := []string{cursor, icon, num, titleStr}
+		for _, c := range midCols {
+			var val string
+			switch c.dataType {
+			case "REPOSITORY":
+				val = card.Repo
+			default:
+				if card.FieldValues != nil {
+					val = card.FieldValues[c.name]
+				}
+			}
+			cellStr := lipgloss.NewStyle().Width(colW + 1).Render(
+				renderCell(val, c.dataType, colW),
+			)
+			rowParts = append(rowParts, cellStr)
 		}
-		assignStr = theme.Muted.Width(assignW).Render(assignStr)
-
-		row := cursor + icon + num + titleStr + statusStr + assignStr
-		lines = append(lines, row)
+		if showAssignees {
+			assignStr := ""
+			if len(card.Assignees) > 0 {
+				assignStr = utils.Truncate(strings.Join(card.Assignees, " "), assignW)
+			}
+			rowParts = append(rowParts, theme.Muted.Width(assignW).Render(assignStr))
+		}
+		lines = append(lines, strings.Join(rowParts, ""))
 	}
 
 	// Scroll indicator
@@ -265,11 +317,23 @@ func itemIcon(itemType, state string) string {
 	}
 }
 
+func renderCell(val, dataType string, width int) string {
+	if val == "" {
+		return strings.Repeat(" ", width)
+	}
+	switch dataType {
+	case "SINGLE_SELECT":
+		return statusBadge(val, width)
+	default:
+		return theme.Muted.Width(width).Render(utils.Truncate(val, width))
+	}
+}
+
 func statusBadge(status string, width int) string {
 	if status == "" {
 		return strings.Repeat(" ", width)
 	}
-	s := truncate(status, width)
+	s := utils.Truncate(status, width)
 	lower := strings.ToLower(status)
 	switch {
 	case strings.Contains(lower, "done") || strings.Contains(lower, "complete") || strings.Contains(lower, "closed"):
@@ -341,7 +405,7 @@ func (m Model) renderTabBar(width int) string {
 func renderColumn(col api.Column, active bool, selectedCard, width, height int) string {
 	cardW := width - 2
 	header := theme.ColumnHeader.Width(cardW).Render(
-		truncate(col.Name, cardW) + fmt.Sprintf(" (%d)", len(col.Cards)),
+		utils.Truncate(col.Name, cardW) + fmt.Sprintf(" (%d)", len(col.Cards)),
 	)
 	lines := []string{header}
 	maxCards := height - 3
@@ -350,7 +414,7 @@ func renderColumn(col api.Column, active bool, selectedCard, width, height int) 
 		if len(lines)-1 >= maxCards {
 			break
 		}
-		name := truncate(card.Title, cardW-3)
+		name := utils.Truncate(card.Title, cardW-3)
 		var line string
 		if active && i == selectedCard {
 			line = theme.CardCursor.Render("> ") + theme.CardSelected.Render(name)
@@ -377,13 +441,3 @@ func renderColumn(col api.Column, active bool, selectedCard, width, height int) 
 	return colStyle.Render(strings.Join(lines, "\n"))
 }
 
-func truncate(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n-1]) + "…"
-}

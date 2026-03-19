@@ -6,6 +6,7 @@ import (
 
 	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
+	"github.com/0xheartcode/lazydash/internal/utils"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -83,7 +84,11 @@ func (m Model) View() string {
 		if len(lines) >= innerH {
 			break
 		}
-		name := truncate(p.Title, innerW-3)
+		label := p.Title
+		if p.Owner != "" {
+			label = p.Owner + "/" + p.Title
+		}
+		name := utils.Truncate(label, innerW-3)
 		var row string
 		if i == m.cursor {
 			row = theme.CardCursor.Render("> ") + theme.CardSelected.Render(name)
@@ -100,24 +105,6 @@ func (m Model) View() string {
 
 	content := strings.Join(lines, "\n")
 	return border.Width(m.width - 2).Height(m.height - 2).Render(content)
-}
-
-func truncate(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n-1]) + "…"
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // TabTitle returns the display string used in a tab bar.

@@ -15,6 +15,10 @@ type Config struct {
 type Defaults struct {
 	Orgs                   []string `yaml:"orgs"`
 	RefreshIntervalMinutes int      `yaml:"refreshIntervalMinutes"`
+	IgnoreProjects         []string `yaml:"ignoreProjects"`
+	IgnoreOrgs             []string `yaml:"ignoreOrgs"`
+	OnlyOrgs               []string `yaml:"onlyOrgs"`
+	OnlyProjects           []string `yaml:"onlyProjects"`
 }
 
 type Keybindings struct {
@@ -23,13 +27,15 @@ type Keybindings struct {
 	Refresh       string `yaml:"refresh"`
 	Help          string `yaml:"help"`
 	Quit          string `yaml:"quit"`
+	PrevView      string `yaml:"prevView"`
+	NextView      string `yaml:"nextView"`
 }
 
 func defaults() Config {
 	return Config{
 		Defaults: Defaults{
 			Orgs:                   []string{},
-			RefreshIntervalMinutes: 5,
+			RefreshIntervalMinutes: 0,
 		},
 		Keybindings: Keybindings{
 			OpenInBrowser: "o",
@@ -37,6 +43,8 @@ func defaults() Config {
 			Refresh:       "r",
 			Help:          "?",
 			Quit:          "q",
+			PrevView:      "[",
+			NextView:      "]",
 		},
 	}
 }
@@ -83,10 +91,12 @@ func Load(flagPath string) (*Config, error) {
 	if cfg.Keybindings.Quit == "" {
 		cfg.Keybindings.Quit = d.Keybindings.Quit
 	}
-	if cfg.Defaults.RefreshIntervalMinutes == 0 {
-		cfg.Defaults.RefreshIntervalMinutes = d.Defaults.RefreshIntervalMinutes
+	if cfg.Keybindings.PrevView == "" {
+		cfg.Keybindings.PrevView = d.Keybindings.PrevView
 	}
-
+	if cfg.Keybindings.NextView == "" {
+		cfg.Keybindings.NextView = d.Keybindings.NextView
+	}
 	return &cfg, nil
 }
 

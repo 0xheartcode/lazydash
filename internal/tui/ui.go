@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/config"
@@ -22,7 +23,7 @@ type pane int
 const (
 	paneProjects pane = iota
 	paneBoard
-	paneCount = 2
+	paneCount // always equals the number of panes; no magic number
 )
 
 // --- Messages ---
@@ -30,6 +31,7 @@ const (
 type projectsLoadedMsg struct{ projects []api.Project }
 type boardLoadedMsg struct{ data *api.BoardData }
 type errMsg struct{ err error }
+type tickMsg struct{}
 type clientReadyMsg struct {
 	login  string
 	orgs   []string
@@ -62,6 +64,11 @@ type Model struct {
 	viewIdx   int
 
 	showHelp bool
+}
+
+func (m *Model) setStatus(s string) {
+	m.status = s
+	m.footer.SetStatus(s)
 }
 
 func newModel(cfg *config.Config) Model {
@@ -116,15 +123,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.client = msg.client
 		m.login = msg.login
 		m.orgs = mergeOrgs(msg.orgs, m.cfg.Defaults.Orgs)
-		m.status = fmt.Sprintf("Loading projects for %s…", m.login)
+		m.setStatus(fmt.Sprintf("Loading projects for %s…", m.login))
 		return m, m.fetchProjects()
 
 	case projectsLoadedMsg:
 		m.loading = false
-		m.status = fmt.Sprintf("%d projects", len(msg.projects))
+		m.setStatus(fmt.Sprintf("%d projects", len(msg.projects)))
 		m.projects.SetProjects(msg.projects)
 		m.syncActivePane()
-		return m, nil
+		return m, m.scheduleRefresh()
+
+	case tickMsg:
+		if !m.loading {
+			m.loading = true
+			m.setStatus("Refreshing…")
+			return m, tea.Batch(m.spinner.Tick, m.fetchProjects())
+		}
+		return m, m.scheduleRefresh()
 
 	case boardLoadedMsg:
 		m.loading = false
@@ -133,7 +148,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyView(0)
 		m.active = paneBoard
 		m.syncActivePane()
-		m.status = fmt.Sprintf("%d items · %d views", len(msg.data.Items), len(msg.data.Views))
+		status := fmt.Sprintf("%d items · %d views", len(msg.data.Items), len(msg.data.Views))
+		if len(msg.data.Items) == 100 {
+			status += "  ⚠ capped at 100 items"
+		}
+		m.setStatus(status)
 		return m, nil
 
 	case errMsg:
@@ -142,7 +161,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if utils.IsAuthError(msg.err) {
 			m.err = fmt.Errorf("not authenticated — run: gh auth login")
 		}
-		m.status = "error: " + m.err.Error()
+		m.setStatus("error: " + m.err.Error())
 		return m, nil
 
 	case tea.KeyMsg:
@@ -155,7 +174,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func mergeOrgs(discovered, configured []string) []string {
 	seen := make(map[string]bool)
 	var merged []string
-	for _, o := range append(discovered, configured...) {
+	for _, o := range append(append([]string(nil), discovered...), configured...) {
 		lo := strings.ToLower(o)
 		if !seen[lo] {
 			seen[lo] = true
@@ -177,6 +196,7 @@ func (m *Model) applyView(idx int) {
 
 	m.board.SetLayout(view.Layout)
 	m.board.SetViews(m.boardData.Views, idx)
+	m.board.SetVisibleFields(view.VisibleFields)
 	m.footer.SetBoardLayout(view.Layout)
 
 	if view.Layout == "TABLE_LAYOUT" || view.Layout == "ROADMAP_LAYOUT" {
@@ -227,7 +247,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case m.keys.Refresh:
 		if !m.loading {
 			m.loading = true
-			m.status = "Refreshing…"
+			m.setStatus("Refreshing…")
 			return m, tea.Batch(m.spinner.Tick, m.fetchProjects())
 		}
 		return m, nil
@@ -259,7 +279,7 @@ func (m Model) handleProjectsKey(k string) (tea.Model, tea.Cmd) {
 	case m.keys.Enter, m.keys.Right:
 		if p := m.projects.Selected(); p != nil {
 			m.loading = true
-			m.status = fmt.Sprintf("Loading %s…", p.Title)
+			m.setStatus(fmt.Sprintf("Loading %s…", p.Title))
 			return m, tea.Batch(m.spinner.Tick, fetchBoardCmd(p.ID, m.client))
 		}
 	}
@@ -276,11 +296,11 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 		m.board.MoveLeft()
 	case m.keys.Right:
 		m.board.MoveRight()
-	case "[":
+	case m.keys.PrevView:
 		if m.boardData != nil && m.viewIdx > 0 {
 			m.applyView(m.viewIdx - 1)
 		}
-	case "]":
+	case m.keys.NextView:
 		if m.boardData != nil && m.viewIdx < len(m.boardData.Views)-1 {
 			m.applyView(m.viewIdx + 1)
 		}
@@ -297,7 +317,7 @@ func (m *Model) openURL(card *api.Card) {
 		return
 	}
 	if card.URL == "" {
-		m.status = "no URL — draft issues cannot be opened in browser"
+		m.setStatus("no URL — draft issues cannot be opened in browser")
 		return
 	}
 	_ = utils.OpenInBrowser(card.URL)
@@ -310,11 +330,11 @@ func (m *Model) openGhDash(card *api.Card) {
 	}
 	launched, err := utils.OpenInGhDash(url)
 	if err != nil {
-		m.status = "error opening: " + err.Error()
+		m.setStatus("error opening: " + err.Error())
 		return
 	}
 	if !launched {
-		m.status = "gh-dash not found — opening in browser. Install: " + utils.GhDashInstallHint()
+		m.setStatus("gh-dash not found — opening in browser. Install: " + utils.GhDashInstallHint())
 	}
 }
 
@@ -342,7 +362,6 @@ func (m Model) View() string {
 		)
 	}
 
-	m.footer.SetStatus(m.status)
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.footer.View())
 }
 
@@ -393,10 +412,22 @@ func fetchLoginCmd() tea.Cmd {
 	}
 }
 
+func (m Model) scheduleRefresh() tea.Cmd {
+	if m.cfg.Defaults.RefreshIntervalMinutes <= 0 {
+		return nil
+	}
+	d := time.Duration(m.cfg.Defaults.RefreshIntervalMinutes) * time.Minute
+	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
 func (m Model) fetchProjects() tea.Cmd {
 	client := m.client
 	login := m.login
 	orgs := m.orgs
+	ignoreOrgs := m.cfg.Defaults.IgnoreOrgs
+	ignoreProjects := m.cfg.Defaults.IgnoreProjects
+	onlyOrgs := m.cfg.Defaults.OnlyOrgs
+	onlyProjects := m.cfg.Defaults.OnlyProjects
 	return func() tea.Msg {
 		if client == nil {
 			return errMsg{fmt.Errorf("client not initialized")}
@@ -405,14 +436,93 @@ func (m Model) fetchProjects() tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		for _, org := range orgs {
+
+		// Step 1 — determine effective org list.
+		var effectiveOrgs []string
+		if len(onlyOrgs) > 0 {
+			effectiveOrgs = onlyOrgs
+		} else {
+			for _, org := range orgs {
+				if !isIgnored(org, ignoreOrgs) {
+					effectiveOrgs = append(effectiveOrgs, org)
+				}
+			}
+		}
+
+		// Step 2 — fetch all effective org projects.
+		for _, org := range effectiveOrgs {
 			orgProjects, err := client.ListOrgProjects(org)
 			if err == nil {
 				projects = append(projects, orgProjects...)
 			}
 		}
+
+		// Step 3 — filter final project list.
+		if len(onlyProjects) > 0 {
+			projects = filterAllowedProjects(projects, onlyProjects)
+		} else {
+			projects = filterIgnoredProjects(projects, ignoreProjects)
+		}
 		return projectsLoadedMsg{projects}
 	}
+}
+
+func isIgnored(name string, list []string) bool {
+	lower := strings.ToLower(name)
+	for _, item := range list {
+		if strings.ToLower(item) == lower {
+			return true
+		}
+	}
+	return false
+}
+
+func filterIgnoredProjects(projects []api.Project, ignore []string) []api.Project {
+	if len(ignore) == 0 {
+		return projects
+	}
+	lower := make([]string, len(ignore))
+	for i, p := range ignore {
+		lower[i] = strings.ToLower(p)
+	}
+	var out []api.Project
+	for _, p := range projects {
+		ownerTitle := strings.ToLower(p.Owner + "/" + p.Title)
+		bare := strings.ToLower(p.Title)
+		skip := false
+		for _, lp := range lower {
+			if lp == ownerTitle || lp == bare {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func filterAllowedProjects(projects []api.Project, only []string) []api.Project {
+	if len(only) == 0 {
+		return projects
+	}
+	lower := make([]string, len(only))
+	for i, p := range only {
+		lower[i] = strings.ToLower(p)
+	}
+	var out []api.Project
+	for _, p := range projects {
+		ownerTitle := strings.ToLower(p.Owner + "/" + p.Title)
+		bare := strings.ToLower(p.Title)
+		for _, lp := range lower {
+			if lp == ownerTitle || lp == bare {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func fetchBoardCmd(projectID string, client *api.Client) tea.Cmd {

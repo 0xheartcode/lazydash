@@ -76,7 +76,7 @@ func (m Model) hintBar() string {
 				hint("j/k", "move"),
 				hint(m.keys.OpenInBrowser, "browser"),
 				hint(m.keys.OpenInGhDash, "gh-dash"),
-				hint("[ ]", "views"),
+				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
 		} else {
@@ -85,7 +85,7 @@ func (m Model) hintBar() string {
 				hint("h/l", "column"),
 				hint(m.keys.OpenInBrowser, "browser"),
 				hint(m.keys.OpenInGhDash, "gh-dash"),
-				hint("[ ]", "views"),
+				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
 		}

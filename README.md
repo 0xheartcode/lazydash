@@ -1,6 +1,7 @@
 # lazydash
 
-A keyboard-driven terminal UI for GitHub Projects v2.
+Humble keyboard-driven terminal UI for GitHub Projects.
+##### A browser for your projects, in your terminal.
 
 ```
 ┌─ lazydash ──────────────────────────────────────────────────────┐

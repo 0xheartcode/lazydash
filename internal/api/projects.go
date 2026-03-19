@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strconv"
 
 	goggh "github.com/cli/go-gh/v2/pkg/api"
 	graphql "github.com/cli/shurcooL-graphql"
@@ -12,10 +13,10 @@ type Project struct {
 	ID          string
 	Number      int
 	Title       string
+	Owner       string
 	Description string
 	URL         string
 	UpdatedAt   string
-	Closed      bool
 }
 
 // Column is a named group of cards on a board view.
@@ -26,24 +27,33 @@ type Column struct {
 
 // Card is a single item on the board.
 type Card struct {
-	ID        string
-	Type      string // ISSUE | PULL_REQUEST | DRAFT_ISSUE
-	Number    int
-	Title     string
-	State     string
-	URL       string
-	Repo      string
-	Assignees []string
-	Status    string
-	Body      string
+	ID          string
+	Type        string // ISSUE | PULL_REQUEST | DRAFT_ISSUE
+	Number      int
+	Title       string
+	State       string
+	URL         string
+	Repo        string
+	Assignees   []string
+	Status      string
+	Body        string
+	FieldValues map[string]string // all field values keyed by field name
+}
+
+// VisibleField is a field configured to be shown in a view.
+type VisibleField struct {
+	ID       string
+	Name     string
+	DataType string // TITLE | ASSIGNEES | SINGLE_SELECT | DATE | NUMBER | TEXT | ITERATION | MILESTONE | REPOSITORY | LABELS | LINKED_PULL_REQUESTS
 }
 
 // ProjectView mirrors a saved view from GitHub Projects v2.
 type ProjectView struct {
-	ID           string
-	Name         string
-	Layout       string // BOARD_LAYOUT | TABLE_LAYOUT | ROADMAP_LAYOUT
-	GroupByField string // name of the single-select field used for columns
+	ID            string
+	Name          string
+	Layout        string // BOARD_LAYOUT | TABLE_LAYOUT | ROADMAP_LAYOUT
+	GroupByField  string
+	VisibleFields []VisibleField
 }
 
 // SelectField is a single-select field with ordered options.
@@ -102,15 +112,16 @@ func GroupByField(data *BoardData, fieldName string) []Column {
 			continue
 		}
 		card := Card{
-			ID:        item.ID,
-			Type:      item.Type,
-			Number:    item.Number,
-			Title:     item.Title,
-			State:     item.State,
-			URL:       item.URL,
-			Repo:      item.Repo,
-			Assignees: item.Assignees,
-			Body:      item.Body,
+			ID:          item.ID,
+			Type:        item.Type,
+			Number:      item.Number,
+			Title:       item.Title,
+			State:       item.State,
+			URL:         item.URL,
+			Repo:        item.Repo,
+			Assignees:   item.Assignees,
+			Body:        item.Body,
+			FieldValues: item.FieldValues,
 		}
 
 		val := item.FieldValues[fieldName]
@@ -206,10 +217,10 @@ func (c *Client) ListUserProjects(login string) ([]Project, error) {
 			ID:          n.ID,
 			Number:      n.Number,
 			Title:       n.Title,
+			Owner:       login,
 			Description: n.ShortDescription,
 			URL:         n.URL,
 			UpdatedAt:   n.UpdatedAt,
-			Closed:      n.Closed,
 		})
 	}
 	return projects, nil
@@ -247,10 +258,10 @@ func (c *Client) ListOrgProjects(org string) ([]Project, error) {
 			ID:          n.ID,
 			Number:      n.Number,
 			Title:       n.Title,
+			Owner:       org,
 			Description: n.ShortDescription,
 			URL:         n.URL,
 			UpdatedAt:   n.UpdatedAt,
-			Closed:      n.Closed,
 		})
 	}
 	return projects, nil
@@ -264,16 +275,17 @@ func FlatItems(data *BoardData) []Card {
 			continue
 		}
 		cards = append(cards, Card{
-			ID:        item.ID,
-			Type:      item.Type,
-			Number:    item.Number,
-			Title:     item.Title,
-			State:     item.State,
-			URL:       item.URL,
-			Repo:      item.Repo,
-			Assignees: item.Assignees,
-			Body:      item.Body,
-			Status:    item.FieldValues["Status"],
+			ID:          item.ID,
+			Type:        item.Type,
+			Number:      item.Number,
+			Title:       item.Title,
+			State:       item.State,
+			URL:         item.URL,
+			Repo:        item.Repo,
+			Assignees:   item.Assignees,
+			Body:        item.Body,
+			Status:      item.FieldValues["Status"],
+			FieldValues: item.FieldValues,
 		})
 	}
 	return cards
@@ -316,6 +328,13 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 								} `graphql:"... on ProjectV2SingleSelectField"`
 							}
 						} `graphql:"groupByFields(first: 5)"`
+						VisibleFields struct {
+							Nodes []struct {
+								ID       string
+								Name     string
+								DataType string
+							}
+						} `graphql:"visibleFields(first: 20)"`
 					}
 				} `graphql:"views(first: 20)"`
 				Fields struct {
@@ -375,6 +394,48 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 										} `graphql:"... on ProjectV2SingleSelectField"`
 									}
 								} `graphql:"... on ProjectV2ItemFieldSingleSelectValue"`
+								TextValue struct {
+									Text  string
+									Field struct {
+										AsField struct {
+											Name string
+										} `graphql:"... on ProjectV2Field"`
+									}
+								} `graphql:"... on ProjectV2ItemFieldTextValue"`
+								NumberValue struct {
+									Number float64
+									Field  struct {
+										AsField struct {
+											Name string
+										} `graphql:"... on ProjectV2Field"`
+									}
+								} `graphql:"... on ProjectV2ItemFieldNumberValue"`
+								DateValue struct {
+									Date  string
+									Field struct {
+										AsField struct {
+											Name string
+										} `graphql:"... on ProjectV2Field"`
+									}
+								} `graphql:"... on ProjectV2ItemFieldDateValue"`
+								IterationValue struct {
+									Title string
+									Field struct {
+										AsIterField struct {
+											Name string
+										} `graphql:"... on ProjectV2IterationField"`
+									}
+								} `graphql:"... on ProjectV2ItemFieldIterationValue"`
+								MilestoneValue struct {
+									Milestone struct {
+										Title string
+									}
+									Field struct {
+										AsField struct {
+											Name string
+										} `graphql:"... on ProjectV2Field"`
+									}
+								} `graphql:"... on ProjectV2ItemFieldMilestoneValue"`
 							}
 						} `graphql:"fieldValues(first: 20)"`
 					}
@@ -404,7 +465,7 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 		fields = append(fields, field)
 	}
 
-	// Build views, resolving groupByField name.
+	// Build views, resolving groupByField name and visible fields.
 	var views []ProjectView
 	for _, v := range q.Node.Project.Views.Nodes {
 		pv := ProjectView{
@@ -419,8 +480,12 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 				break
 			}
 		}
-		// Only include board views that have a groupByField,
-		// or fall back gracefully for other layouts.
+		// Parse visible fields for this view.
+		for _, vf := range v.VisibleFields.Nodes {
+			if vf.Name != "" {
+				pv.VisibleFields = append(pv.VisibleFields, VisibleField{ID: vf.ID, Name: vf.Name, DataType: vf.DataType})
+			}
+		}
 		views = append(views, pv)
 	}
 
@@ -462,10 +527,28 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 			ri.Body = item.Content.AsDraftIssue.Body
 		}
 		for _, fv := range item.FieldValues.Nodes {
-			fieldName := fv.SingleSelectValue.Field.AsSelectField.Name
-			val := fv.SingleSelectValue.Name
-			if fieldName != "" && val != "" {
-				ri.FieldValues[fieldName] = val
+			if fn := fv.SingleSelectValue.Field.AsSelectField.Name; fn != "" {
+				if v := fv.SingleSelectValue.Name; v != "" {
+					ri.FieldValues[fn] = v
+				}
+			} else if fn := fv.TextValue.Field.AsField.Name; fn != "" {
+				if v := fv.TextValue.Text; v != "" {
+					ri.FieldValues[fn] = v
+				}
+			} else if fn := fv.NumberValue.Field.AsField.Name; fn != "" {
+				ri.FieldValues[fn] = strconv.FormatFloat(fv.NumberValue.Number, 'f', -1, 64)
+			} else if fn := fv.DateValue.Field.AsField.Name; fn != "" {
+				if v := fv.DateValue.Date; v != "" {
+					ri.FieldValues[fn] = v
+				}
+			} else if fn := fv.IterationValue.Field.AsIterField.Name; fn != "" {
+				if v := fv.IterationValue.Title; v != "" {
+					ri.FieldValues[fn] = v
+				}
+			} else if fn := fv.MilestoneValue.Field.AsField.Name; fn != "" {
+				if v := fv.MilestoneValue.Milestone.Title; v != "" {
+					ri.FieldValues[fn] = v
+				}
 			}
 		}
 		items = append(items, ri)
