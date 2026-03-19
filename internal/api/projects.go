@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	goggh "github.com/cli/go-gh/v2/pkg/api"
 	graphql "github.com/cli/shurcooL-graphql"
@@ -63,11 +64,17 @@ type ProjectView struct {
 	VisibleFields []VisibleField
 }
 
+// FieldOption is one option of a single-select field, including its GitHub color enum.
+type FieldOption struct {
+	Name  string
+	Color string // GitHub enum: GRAY | BLUE | GREEN | YELLOW | ORANGE | RED | PINK | PURPLE
+}
+
 // SelectField is a single-select field with ordered options.
 type SelectField struct {
 	ID      string
 	Name    string
-	Options []string // ordered option names
+	Options []FieldOption
 }
 
 // RawItem is an ungrouped project item with all its field values.
@@ -101,7 +108,9 @@ func GroupByField(data *BoardData, fieldName string) []Column {
 	var options []string
 	for _, f := range data.Fields {
 		if f.Name == fieldName {
-			options = f.Options
+			for _, o := range f.Options {
+				options = append(options, o.Name)
+			}
 			break
 		}
 	}
@@ -353,8 +362,9 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 							ID      string
 							Name    string
 							Options []struct {
-								ID   string
-								Name string
+								ID    string
+								Name  string
+								Color string
 							}
 						} `graphql:"... on ProjectV2SingleSelectField"`
 					}
@@ -478,7 +488,7 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 		}
 		field := SelectField{ID: sf.ID, Name: sf.Name}
 		for _, opt := range sf.Options {
-			field.Options = append(field.Options, opt.Name)
+			field.Options = append(field.Options, FieldOption{Name: opt.Name, Color: opt.Color})
 		}
 		fields = append(fields, field)
 	}
@@ -577,4 +587,42 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 	}
 
 	return &BoardData{Views: views, Fields: fields, Items: items}, nil
+}
+
+// OptionColors builds a lookup map of fieldName → optionName → terminal color string
+// derived from each option's GitHub color enum. Used by the board renderer.
+func OptionColors(data *BoardData) map[string]map[string]string {
+	result := make(map[string]map[string]string, len(data.Fields))
+	for _, f := range data.Fields {
+		m := make(map[string]string, len(f.Options))
+		for _, opt := range f.Options {
+			m[opt.Name] = githubColorToTerminal(opt.Color)
+		}
+		result[f.Name] = m
+	}
+	return result
+}
+
+// githubColorToTerminal maps a GitHub single-select color enum to a 256-color terminal code.
+func githubColorToTerminal(color string) string {
+	switch strings.ToUpper(color) {
+	case "GRAY":
+		return "241"
+	case "BLUE":
+		return "39"
+	case "GREEN":
+		return "76"
+	case "YELLOW":
+		return "227"
+	case "ORANGE":
+		return "214"
+	case "RED":
+		return "196"
+	case "PINK":
+		return "212"
+	case "PURPLE":
+		return "99"
+	default:
+		return "241"
+	}
 }

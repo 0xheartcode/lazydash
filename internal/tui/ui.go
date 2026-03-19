@@ -197,6 +197,7 @@ func (m *Model) applyView(idx int) {
 	m.board.SetLayout(view.Layout)
 	m.board.SetViews(m.boardData.Views, idx)
 	m.board.SetVisibleFields(view.VisibleFields)
+	m.board.SetOptionColors(api.OptionColors(m.boardData))
 	m.footer.SetBoardLayout(view.Layout)
 
 	if view.Layout == "TABLE_LAYOUT" || view.Layout == "ROADMAP_LAYOUT" {

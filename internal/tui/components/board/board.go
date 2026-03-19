@@ -29,6 +29,7 @@ type Model struct {
 	tableRow      int
 	tableScroll   int
 	visibleFields []api.VisibleField
+	optionColors  map[string]map[string]string // fieldName → optionName → terminal color
 }
 
 func New() Model { return Model{layout: "BOARD_LAYOUT"} }
@@ -53,6 +54,7 @@ func (m *Model) SetTableItems(items []api.Card) {
 }
 
 func (m *Model) SetVisibleFields(fields []api.VisibleField) { m.visibleFields = fields }
+func (m *Model) SetOptionColors(colors map[string]map[string]string) { m.optionColors = colors }
 
 // --- Navigation ---
 
@@ -262,7 +264,7 @@ func (m Model) renderTable(innerW, innerH int) string {
 			switch c.dataType {
 			case "REPOSITORY":
 				cellStr = lipgloss.NewStyle().Width(colW + 1).Render(
-					renderCell(card.Repo, c.dataType, colW),
+					renderCell(card.Repo, c.dataType, "", colW),
 				)
 			case "LABELS":
 				cellStr = lipgloss.NewStyle().Width(colW + 1).Render(
@@ -273,8 +275,12 @@ func (m Model) renderTable(innerW, innerH int) string {
 				if card.FieldValues != nil {
 					val = card.FieldValues[c.name]
 				}
+				optColor := ""
+				if m.optionColors != nil {
+					optColor = m.optionColors[c.name][val]
+				}
 				cellStr = lipgloss.NewStyle().Width(colW + 1).Render(
-					renderCell(val, c.dataType, colW),
+					renderCell(val, c.dataType, optColor, colW),
 				)
 			}
 			rowParts = append(rowParts, cellStr)
@@ -352,12 +358,15 @@ func renderLabels(labels []api.Label, width int) string {
 	return result
 }
 
-func renderCell(val, dataType string, width int) string {
+func renderCell(val, dataType, optColor string, width int) string {
 	if val == "" {
 		return strings.Repeat(" ", width)
 	}
 	switch dataType {
 	case "SINGLE_SELECT":
+		if optColor != "" {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(optColor)).Render(utils.Truncate(val, width))
+		}
 		return statusBadge(val, width)
 	default:
 		return theme.Muted.Width(width).Render(utils.Truncate(val, width))
@@ -371,12 +380,29 @@ func statusBadge(status string, width int) string {
 	s := utils.Truncate(status, width)
 	lower := strings.ToLower(status)
 	switch {
+	// Status values
 	case strings.Contains(lower, "done") || strings.Contains(lower, "complete") || strings.Contains(lower, "closed"):
 		return theme.StatusClosed.Render(s)
 	case strings.Contains(lower, "progress") || strings.Contains(lower, "active") || strings.Contains(lower, "started"):
 		return theme.StatusOpen.Render(s)
 	case strings.Contains(lower, "review") || strings.Contains(lower, "planning"):
 		return theme.StatusMerged.Render(s)
+	// Type values
+	case lower == "bug":
+		return lipgloss.NewStyle().Foreground(theme.ColorDanger).Render(s)
+	case lower == "feature":
+		return lipgloss.NewStyle().Foreground(theme.ColorPrimary).Render(s)
+	case lower == "chore":
+		return lipgloss.NewStyle().Foreground(theme.ColorMuted).Render(s)
+	case lower == "ci":
+		return lipgloss.NewStyle().Foreground(theme.ColorSecondary).Render(s)
+	// Effort values
+	case strings.Contains(lower, "quick"):
+		return lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render(s)
+	case lower == "medium":
+		return lipgloss.NewStyle().Foreground(theme.ColorWarning).Render(s)
+	case lower == "major":
+		return lipgloss.NewStyle().Foreground(theme.ColorDanger).Bold(true).Render(s)
 	default:
 		return theme.Muted.Render(s)
 	}
