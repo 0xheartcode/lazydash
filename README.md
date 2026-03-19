@@ -25,6 +25,12 @@ Requires [gh CLI](https://cli.github.com/) authenticated (`gh auth login`).
 go install github.com/0xheartcode/lazydash@latest
 ```
 
+Make sure `$HOME/go/bin` is in your PATH:
+
+```bash
+echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bashrc  # or ~/.zshrc
+```
+
 Or build from source:
 
 ```bash
