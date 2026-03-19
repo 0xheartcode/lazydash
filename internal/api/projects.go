@@ -25,6 +25,12 @@ type Column struct {
 	Cards []Card
 }
 
+// Label holds a GitHub issue label with its display color.
+type Label struct {
+	Name  string
+	Color string // hex color without '#', e.g. "d73a4a"
+}
+
 // Card is a single item on the board.
 type Card struct {
 	ID          string
@@ -35,6 +41,7 @@ type Card struct {
 	URL         string
 	Repo        string
 	Assignees   []string
+	Labels      []Label
 	Status      string
 	Body        string
 	FieldValues map[string]string // all field values keyed by field name
@@ -74,6 +81,7 @@ type RawItem struct {
 	URL         string
 	Repo        string
 	Assignees   []string
+	Labels      []Label
 	Body        string
 	FieldValues map[string]string // field name → selected option name
 }
@@ -120,6 +128,7 @@ func GroupByField(data *BoardData, fieldName string) []Column {
 			URL:         item.URL,
 			Repo:        item.Repo,
 			Assignees:   item.Assignees,
+			Labels:      item.Labels,
 			Body:        item.Body,
 			FieldValues: item.FieldValues,
 		}
@@ -283,6 +292,7 @@ func FlatItems(data *BoardData) []Card {
 			URL:         item.URL,
 			Repo:        item.Repo,
 			Assignees:   item.Assignees,
+			Labels:      item.Labels,
 			Body:        item.Body,
 			Status:      item.FieldValues["Status"],
 			FieldValues: item.FieldValues,
@@ -436,6 +446,14 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 										} `graphql:"... on ProjectV2Field"`
 									}
 								} `graphql:"... on ProjectV2ItemFieldMilestoneValue"`
+								LabelValue struct {
+									Labels struct {
+										Nodes []struct {
+											Name  string
+											Color string
+										}
+									} `graphql:"labels(first: 10)"`
+								} `graphql:"... on ProjectV2ItemFieldLabelValue"`
 							}
 						} `graphql:"fieldValues(first: 20)"`
 					}
@@ -548,6 +566,10 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 			} else if fn := fv.MilestoneValue.Field.AsField.Name; fn != "" {
 				if v := fv.MilestoneValue.Milestone.Title; v != "" {
 					ri.FieldValues[fn] = v
+				}
+			} else if len(fv.LabelValue.Labels.Nodes) > 0 {
+				for _, l := range fv.LabelValue.Labels.Nodes {
+					ri.Labels = append(ri.Labels, Label{Name: l.Name, Color: l.Color})
 				}
 			}
 		}

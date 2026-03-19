@@ -61,10 +61,16 @@ lazydash --config ~/.config/lazydash/config.yml
 | `tab` | Next pane |
 | `shift+tab` | Previous pane |
 | `enter` | Select |
+| `[` / `]` | Cycle project views (Board → Table → Roadmap) |
 | `o` | Open in browser |
+| `d` | Open in gh-dash |
 | `r` | Refresh |
 | `?` | Help |
 | `q` | Quit |
+
+## Features
+
+lazydash mirrors your GitHub Project views — Board, Table, and Roadmap — and lets you switch between them with `[` / `]`. Views are fetched live from the GitHub Projects API so what you see in the TUI matches what you see in the browser.
 
 ## Config
 
@@ -78,10 +84,13 @@ Config is loaded from the first location found:
 ```yaml
 defaults:
   orgs: []                       # additional GitHub orgs to show projects from
+  ignoreProjects: []             # projects to hide e.g. ["owner/name", "name"]
+  ignoreOrgs: []                 # orgs to hide e.g. ["myorg"]
   refreshIntervalMinutes: 5
 
 keybindings:
   openInBrowser: o
+  openInGhDash: d
   refresh: r
   help: "?"
   quit: q

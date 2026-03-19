@@ -258,18 +258,25 @@ func (m Model) renderTable(innerW, innerH int) string {
 
 		rowParts := []string{cursor, icon, num, titleStr}
 		for _, c := range midCols {
-			var val string
+			var cellStr string
 			switch c.dataType {
 			case "REPOSITORY":
-				val = card.Repo
+				cellStr = lipgloss.NewStyle().Width(colW + 1).Render(
+					renderCell(card.Repo, c.dataType, colW),
+				)
+			case "LABELS":
+				cellStr = lipgloss.NewStyle().Width(colW + 1).Render(
+					renderLabels(card.Labels, colW),
+				)
 			default:
+				var val string
 				if card.FieldValues != nil {
 					val = card.FieldValues[c.name]
 				}
+				cellStr = lipgloss.NewStyle().Width(colW + 1).Render(
+					renderCell(val, c.dataType, colW),
+				)
 			}
-			cellStr := lipgloss.NewStyle().Width(colW + 1).Render(
-				renderCell(val, c.dataType, colW),
-			)
 			rowParts = append(rowParts, cellStr)
 		}
 		if showAssignees {
@@ -315,6 +322,34 @@ func itemIcon(itemType, state string) string {
 	default:
 		return "  "
 	}
+}
+
+func renderLabels(labels []api.Label, width int) string {
+	if len(labels) == 0 {
+		return strings.Repeat(" ", width)
+	}
+	var parts []string
+	remaining := width
+	for _, l := range labels {
+		if remaining <= 0 {
+			break
+		}
+		name := l.Name
+		if len(name) > remaining {
+			name = name[:remaining]
+		}
+		color := "#" + l.Color
+		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(name)
+		parts = append(parts, badge)
+		remaining -= len(name) + 1 // +1 for the space separator
+	}
+	result := strings.Join(parts, " ")
+	// Pad to width using visible length
+	visLen := lipgloss.Width(result)
+	if visLen < width {
+		result += strings.Repeat(" ", width-visLen)
+	}
+	return result
 }
 
 func renderCell(val, dataType string, width int) string {

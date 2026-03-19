@@ -113,6 +113,15 @@ func (m Model) buildContent(width int) string {
 		lines = append(lines, label("Assigned", strings.Join(c.Assignees, ", ")))
 	}
 
+	if len(c.Labels) > 0 {
+		var labelParts []string
+		for _, l := range c.Labels {
+			colored := lipgloss.NewStyle().Foreground(lipgloss.Color("#" + l.Color)).Render(l.Name)
+			labelParts = append(labelParts, colored)
+		}
+		lines = append(lines, theme.SidebarLabel.Render("Labels:")+" "+strings.Join(labelParts, " "))
+	}
+
 	if c.URL != "" {
 		lines = append(lines, "")
 		lines = append(lines, theme.Muted.Render("o  open in browser"))
