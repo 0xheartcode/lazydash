@@ -11,34 +11,31 @@ import (
 
 const version = "v0.1.0"
 
-// Pane identifies which pane is active, for contextual hints.
 type Pane int
 
 const (
 	PaneProjects Pane = iota
 	PaneBoard
-	PaneSidebar
 )
 
 type Model struct {
-	keys   keys.Bindings
-	width  int
-	pane   Pane
-	status string
+	keys       keys.Bindings
+	width      int
+	pane       Pane
+	boardLayout string // "TABLE_LAYOUT" or "BOARD_LAYOUT"
+	status     string
 }
 
-func New(k keys.Bindings) Model {
-	return Model{keys: k}
-}
+func New(k keys.Bindings) Model { return Model{keys: k} }
 
-func (m *Model) SetWidth(w int) { m.width = w }
-func (m *Model) SetPane(p Pane) { m.pane = p }
-func (m *Model) SetStatus(s string) { m.status = s }
+func (m *Model) SetWidth(w int)            { m.width = w }
+func (m *Model) SetPane(p Pane)            { m.pane = p }
+func (m *Model) SetBoardLayout(l string)   { m.boardLayout = l }
+func (m *Model) SetStatus(s string)        { m.status = s }
 
 func (m Model) View() string {
 	left := m.hintBar()
 	right := theme.Muted.Render(fmt.Sprintf("lazydash %s", version))
-
 	if m.status != "" {
 		right = theme.Muted.Render(m.status)
 	}
@@ -47,8 +44,7 @@ func (m Model) View() string {
 	if gap < 1 {
 		gap = 1
 	}
-	line := left + strings.Repeat(" ", gap) + right
-	return theme.FooterBar.Width(m.width).Render(line)
+	return theme.FooterBar.Width(m.width).Render(left + strings.Repeat(" ", gap) + right)
 }
 
 func hint(key, desc string) string {
@@ -62,31 +58,39 @@ func (m Model) hintBar() string {
 		hint(m.keys.Help, "help"),
 	}
 
+	paneLabel := ""
 	var paneHints []string
+
 	switch m.pane {
 	case PaneProjects:
+		paneLabel = theme.Title.Render("PROJECTS")
 		paneHints = []string{
 			hint("j/k", "move"),
-			hint("enter", "open"),
+			hint("enter", "load"),
 			hint("tab", "→ board"),
 		}
 	case PaneBoard:
-		paneHints = []string{
-			hint("j/k", "card"),
-			hint("h/l", "column"),
-			hint(m.keys.OpenInBrowser, "browser"),
-			hint(m.keys.OpenInGhDash, "gh-dash"),
-			hint("tab", "→ sidebar"),
-		}
-	case PaneSidebar:
-		paneHints = []string{
-			hint("↑/↓", "scroll"),
-			hint(m.keys.OpenInBrowser, "browser"),
-			hint(m.keys.OpenInGhDash, "gh-dash"),
-			hint("tab", "→ projects"),
+		paneLabel = theme.Title.Render("BOARD")
+		if m.boardLayout == "TABLE_LAYOUT" {
+			paneHints = []string{
+				hint("j/k", "move"),
+				hint(m.keys.OpenInBrowser, "browser"),
+				hint(m.keys.OpenInGhDash, "gh-dash"),
+				hint("[ ]", "views"),
+				hint("tab", "→ projects"),
+			}
+		} else {
+			paneHints = []string{
+				hint("j/k", "item"),
+				hint("h/l", "column"),
+				hint(m.keys.OpenInBrowser, "browser"),
+				hint(m.keys.OpenInGhDash, "gh-dash"),
+				hint("[ ]", "views"),
+				hint("tab", "→ projects"),
+			}
 		}
 	}
 
 	all := append(paneHints, common...)
-	return strings.Join(all, "  ")
+	return paneLabel + "  " + strings.Join(all, "  ")
 }

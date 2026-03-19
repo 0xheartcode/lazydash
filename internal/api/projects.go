@@ -256,6 +256,48 @@ func (c *Client) ListOrgProjects(org string) ([]Project, error) {
 	return projects, nil
 }
 
+// FlatItems returns all non-archived items in API order, for table views.
+func FlatItems(data *BoardData) []Card {
+	var cards []Card
+	for _, item := range data.Items {
+		if item.IsArchived {
+			continue
+		}
+		cards = append(cards, Card{
+			ID:        item.ID,
+			Type:      item.Type,
+			Number:    item.Number,
+			Title:     item.Title,
+			State:     item.State,
+			URL:       item.URL,
+			Repo:      item.Repo,
+			Assignees: item.Assignees,
+			Body:      item.Body,
+			Status:    item.FieldValues["Status"],
+		})
+	}
+	return cards
+}
+
+// ListViewerOrgs returns the login names of orgs the authenticated user belongs to.
+func (c *Client) ListViewerOrgs() ([]string, error) {
+	var q struct {
+		Viewer struct {
+			Organizations struct {
+				Nodes []struct{ Login string }
+			} `graphql:"organizations(first: 20)"`
+		}
+	}
+	if err := c.gql.Query("ListViewerOrgs", &q, nil); err != nil {
+		return nil, err
+	}
+	var orgs []string
+	for _, n := range q.Viewer.Organizations.Nodes {
+		orgs = append(orgs, n.Login)
+	}
+	return orgs, nil
+}
+
 // GetProjectBoard fetches views, fields, and all items for a project.
 // Use GroupByField to render a specific view's columns.
 func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {

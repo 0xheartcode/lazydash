@@ -2,13 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/config"
 	"github.com/0xheartcode/lazydash/internal/tui/components/board"
 	"github.com/0xheartcode/lazydash/internal/tui/components/footer"
 	"github.com/0xheartcode/lazydash/internal/tui/components/projectlist"
-	"github.com/0xheartcode/lazydash/internal/tui/components/sidebar"
 	"github.com/0xheartcode/lazydash/internal/tui/keys"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/0xheartcode/lazydash/internal/utils"
@@ -22,7 +22,7 @@ type pane int
 const (
 	paneProjects pane = iota
 	paneBoard
-	paneSidebar
+	paneCount = 2
 )
 
 // --- Messages ---
@@ -32,6 +32,7 @@ type boardLoadedMsg struct{ data *api.BoardData }
 type errMsg struct{ err error }
 type clientReadyMsg struct {
 	login  string
+	orgs   []string
 	client *api.Client
 }
 
@@ -51,11 +52,12 @@ type Model struct {
 	err     error
 	status  string
 
-	login     string
-	projects  projectlist.Model
-	board     board.Model
-	sidebar   sidebar.Model
-	footer    footer.Model
+	login    string
+	orgs     []string
+	projects projectlist.Model
+	board    board.Model
+	footer   footer.Model
+
 	boardData *api.BoardData
 	viewIdx   int
 
@@ -76,20 +78,16 @@ func newModel(cfg *config.Config) Model {
 		active:   paneProjects,
 		projects: projectlist.New(),
 		board:    board.New(),
-		sidebar:  sidebar.New(),
 		footer:   footer.New(k),
 	}
 }
 
-// Start creates and runs the bubbletea program.
 func Start(cfg *config.Config) error {
 	m := newModel(cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
-
-// --- Init ---
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, fetchLoginCmd())
@@ -117,25 +115,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clientReadyMsg:
 		m.client = msg.client
 		m.login = msg.login
+		m.orgs = mergeOrgs(msg.orgs, m.cfg.Defaults.Orgs)
 		m.status = fmt.Sprintf("Loading projects for %s…", m.login)
 		return m, m.fetchProjects()
 
 	case projectsLoadedMsg:
 		m.loading = false
-		m.status = ""
+		m.status = fmt.Sprintf("%d projects", len(msg.projects))
 		m.projects.SetProjects(msg.projects)
 		m.syncActivePane()
 		return m, nil
 
 	case boardLoadedMsg:
 		m.loading = false
-		m.status = ""
 		m.boardData = msg.data
 		m.viewIdx = 0
 		m.applyView(0)
-		m.sidebar.SetCard(nil)
 		m.active = paneBoard
 		m.syncActivePane()
+		m.status = fmt.Sprintf("%d items · %d views", len(msg.data.Items), len(msg.data.Views))
 		return m, nil
 
 	case errMsg:
@@ -154,7 +152,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyView groups board items by the view at idx and pushes columns to the board component.
+func mergeOrgs(discovered, configured []string) []string {
+	seen := make(map[string]bool)
+	var merged []string
+	for _, o := range append(discovered, configured...) {
+		lo := strings.ToLower(o)
+		if !seen[lo] {
+			seen[lo] = true
+			merged = append(merged, o)
+		}
+	}
+	return merged
+}
+
 func (m *Model) applyView(idx int) {
 	if m.boardData == nil || len(m.boardData.Views) == 0 {
 		return
@@ -165,47 +175,43 @@ func (m *Model) applyView(idx int) {
 	m.viewIdx = idx
 	view := m.boardData.Views[idx]
 
-	fieldName := view.GroupByField
-	if fieldName == "" {
-		fieldName = "Status" // fallback for non-board views
-	}
-
-	cols := api.GroupByField(m.boardData, fieldName)
-	m.board.SetColumns(cols)
+	m.board.SetLayout(view.Layout)
 	m.board.SetViews(m.boardData.Views, idx)
+	m.footer.SetBoardLayout(view.Layout)
+
+	if view.Layout == "TABLE_LAYOUT" || view.Layout == "ROADMAP_LAYOUT" {
+		m.board.SetTableItems(api.FlatItems(m.boardData))
+	} else {
+		fieldName := view.GroupByField
+		if fieldName == "" {
+			fieldName = "Status"
+		}
+		m.board.SetColumns(api.GroupByField(m.boardData, fieldName))
+	}
 }
 
 func (m *Model) layout() {
-	projectW := m.width * 20 / 100
-	if projectW < 18 {
-		projectW = 18
+	projectW := m.width * 22 / 100
+	if projectW < 20 {
+		projectW = 20
 	}
-	sidebarW := m.width * 26 / 100
-	if sidebarW < 22 {
-		sidebarW = 22
-	}
-	boardW := m.width - projectW - sidebarW
-
+	contentW := m.width - projectW
 	contentH := m.height - 2
 
 	m.projects.SetSize(projectW, contentH)
-	m.board.SetSize(boardW, contentH)
-	m.sidebar.SetSize(sidebarW, contentH)
+	m.board.SetSize(contentW, contentH)
 	m.footer.SetWidth(m.width)
 }
 
 func (m *Model) syncActivePane() {
 	m.projects.SetActive(m.active == paneProjects)
 	m.board.SetActive(m.active == paneBoard)
-	m.sidebar.SetActive(m.active == paneSidebar)
 
 	switch m.active {
 	case paneProjects:
 		m.footer.SetPane(footer.PaneProjects)
 	case paneBoard:
 		m.footer.SetPane(footer.PaneBoard)
-	case paneSidebar:
-		m.footer.SetPane(footer.PaneSidebar)
 	}
 }
 
@@ -226,11 +232,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case m.keys.NextPane:
-		m.active = (m.active + 1) % 3
+		m.active = (m.active + 1) % paneCount
 		m.syncActivePane()
 		return m, nil
 	case m.keys.PrevPane:
-		m.active = (m.active + 2) % 3
+		m.active = (m.active + paneCount - 1) % paneCount
 		m.syncActivePane()
 		return m, nil
 	}
@@ -240,10 +246,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleProjectsKey(k)
 	case paneBoard:
 		return m.handleBoardKey(k)
-	case paneSidebar:
-		return m.handleSidebarKey(k)
 	}
-
 	return m, nil
 }
 
@@ -281,26 +284,6 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 		if m.boardData != nil && m.viewIdx < len(m.boardData.Views)-1 {
 			m.applyView(m.viewIdx + 1)
 		}
-	case m.keys.Enter:
-		if card := m.board.SelectedCard(); card != nil {
-			m.sidebar.SetCard(card)
-			m.active = paneSidebar
-			m.syncActivePane()
-		}
-	case m.keys.OpenInBrowser:
-		m.openURL(m.board.SelectedCard())
-	case m.keys.OpenInGhDash:
-		m.openGhDash(m.board.SelectedCard())
-	}
-	return m, nil
-}
-
-func (m Model) handleSidebarKey(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case m.keys.Up:
-		m.sidebar.ScrollUp()
-	case m.keys.Down:
-		m.sidebar.ScrollDown()
 	case m.keys.OpenInBrowser:
 		m.openURL(m.board.SelectedCard())
 	case m.keys.OpenInGhDash:
@@ -341,27 +324,21 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "Initializing…"
 	}
-
 	if m.showHelp {
 		return m.helpView()
 	}
 
 	var body string
 	if m.loading {
-		center := lipgloss.Place(
-			m.width, m.height-2,
-			lipgloss.Center, lipgloss.Center,
-			m.spinner.View()+" "+theme.Muted.Render(m.status),
-		)
-		body = center
+		body = lipgloss.Place(m.width, m.height-2, lipgloss.Center, lipgloss.Center,
+			m.spinner.View()+" "+theme.Muted.Render(m.status))
 	} else if m.err != nil {
-		msg := theme.Muted.Render("Error: " + m.err.Error() + "\n\nPress r to retry or q to quit.")
-		body = lipgloss.Place(m.width, m.height-2, lipgloss.Center, lipgloss.Center, msg)
+		body = lipgloss.Place(m.width, m.height-2, lipgloss.Center, lipgloss.Center,
+			theme.Muted.Render("Error: "+m.err.Error()+"\n\nPress r to retry or q to quit."))
 	} else {
 		body = lipgloss.JoinHorizontal(lipgloss.Top,
 			m.projects.View(),
 			m.board.View(),
-			m.sidebar.View(),
 		)
 	}
 
@@ -374,25 +351,21 @@ func (m Model) helpView() string {
 		theme.Title.Render("lazydash — keyboard reference"),
 		"",
 		theme.HelpKey.Render("Navigation"),
-		theme.HelpKey.Render("  tab / shift+tab") + "  " + theme.HelpDesc.Render("cycle panes"),
-		theme.HelpKey.Render("  j / k          ") + "  " + theme.HelpDesc.Render("move up/down"),
-		theme.HelpKey.Render("  h / l          ") + "  " + theme.HelpDesc.Render("move left/right (board columns)"),
+		theme.HelpKey.Render("  tab / shift+tab") + "  " + theme.HelpDesc.Render("cycle panes (PROJECTS ↔ BOARD)"),
+		theme.HelpKey.Render("  j / k          ") + "  " + theme.HelpDesc.Render("move up / down"),
+		theme.HelpKey.Render("  h / l          ") + "  " + theme.HelpDesc.Render("move left / right (board columns only)"),
 		theme.HelpKey.Render("  [ / ]          ") + "  " + theme.HelpDesc.Render("switch project views"),
-		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("select / open"),
+		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("load selected project"),
 		"",
 		theme.HelpKey.Render("Actions"),
-		theme.HelpKey.Render("  "+m.keys.OpenInBrowser+"               ") + "  " + theme.HelpDesc.Render("open in browser"),
-		theme.HelpKey.Render("  "+m.keys.OpenInGhDash+"               ") + "  " + theme.HelpDesc.Render("open in gh-dash (install: gh extension install dlvhdr/gh-dash)"),
-		theme.HelpKey.Render("  "+m.keys.Refresh+"               ") + "  " + theme.HelpDesc.Render("refresh"),
-		theme.HelpKey.Render("  "+m.keys.Help+"               ") + "  " + theme.HelpDesc.Render("toggle this help"),
-		theme.HelpKey.Render("  "+m.keys.Quit+"               ") + "  " + theme.HelpDesc.Render("quit"),
+		theme.HelpKey.Render("  " + m.keys.OpenInBrowser + "               ") + "  " + theme.HelpDesc.Render("open in browser"),
+		theme.HelpKey.Render("  " + m.keys.OpenInGhDash + "               ") + "  " + theme.HelpDesc.Render("open in gh-dash  (install: gh extension install dlvhdr/gh-dash)"),
+		theme.HelpKey.Render("  " + m.keys.Refresh + "               ") + "  " + theme.HelpDesc.Render("refresh"),
+		theme.HelpKey.Render("  " + m.keys.Help + "               ") + "  " + theme.HelpDesc.Render("toggle this help"),
+		theme.HelpKey.Render("  " + m.keys.Quit + "               ") + "  " + theme.HelpDesc.Render("quit"),
 	}
 
-	content := ""
-	for _, r := range rows {
-		content += r + "\n"
-	}
-
+	content := strings.Join(rows, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.ColorPrimary).
@@ -414,14 +387,16 @@ func fetchLoginCmd() tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return clientReadyMsg{login: login, client: client}
+		// Auto-discover org memberships (best-effort — no error on failure).
+		orgs, _ := client.ListViewerOrgs()
+		return clientReadyMsg{login: login, orgs: orgs, client: client}
 	}
 }
 
 func (m Model) fetchProjects() tea.Cmd {
 	client := m.client
 	login := m.login
-	cfg := m.cfg
+	orgs := m.orgs
 	return func() tea.Msg {
 		if client == nil {
 			return errMsg{fmt.Errorf("client not initialized")}
@@ -430,7 +405,7 @@ func (m Model) fetchProjects() tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		for _, org := range cfg.Defaults.Orgs {
+		for _, org := range orgs {
 			orgProjects, err := client.ListOrgProjects(org)
 			if err == nil {
 				projects = append(projects, orgProjects...)
