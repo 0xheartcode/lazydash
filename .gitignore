@@ -1,0 +1,6 @@
+lazydash
+dist/
+*.test
+*.out
+vendor/
+.env
