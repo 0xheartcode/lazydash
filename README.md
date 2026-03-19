@@ -3,20 +3,8 @@
 Humble keyboard-driven terminal UI for GitHub Projects.
 ##### A browser for your projects, in your terminal.
 
-```
-┌─ lazydash ──────────────────────────────────────────────────────┐
-│ Projects (3)         Todo      In Progress   Done               │
-│ ─────────────────    ───────   ───────────   ────   ──────────  │
-│ > My Project         > Fix bug  Review PR    Deploy │ Fix bug   │
-│   Team Q1              Add docs              v2     │ ───────── │
-│   Roadmap              Update UI                    │ Issue #42 │
-│                                                     │ Repo: org │
-│                                                     │ Status:   │
-│                                                     │   Todo    │
-├─────────────────────────────────────────────────────────────────┤
-│ j/k move  h/l columns  tab panes  o browser  ? help  q quit     │
-└─────────────────────────────────────────────────────────────────┘
-```
+![demo](https://github.com/user-attachments/assets/0a1698ac-8a09-4426-a1f9-47f877aeffd2)
+
 
 ## Why
 
