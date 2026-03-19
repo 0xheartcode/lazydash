@@ -75,12 +75,14 @@ func (m Model) hintBar() string {
 			hint("j/k", "card"),
 			hint("h/l", "column"),
 			hint(m.keys.OpenInBrowser, "browser"),
+			hint(m.keys.OpenInGhDash, "gh-dash"),
 			hint("tab", "→ sidebar"),
 		}
 	case PaneSidebar:
 		paneHints = []string{
 			hint("↑/↓", "scroll"),
 			hint(m.keys.OpenInBrowser, "browser"),
+			hint(m.keys.OpenInGhDash, "gh-dash"),
 			hint("tab", "→ projects"),
 		}
 	}

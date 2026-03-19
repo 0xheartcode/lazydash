@@ -137,7 +137,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.loading = false
 		m.err = msg.err
-		m.status = "error: " + msg.err.Error()
+		if utils.IsAuthError(msg.err) {
+			m.err = fmt.Errorf("not authenticated — run: gh auth login")
+		}
+		m.status = "error: " + m.err.Error()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -254,9 +257,9 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 			m.syncActivePane()
 		}
 	case m.keys.OpenInBrowser:
-		if card := m.board.SelectedCard(); card != nil && card.URL != "" {
-			_ = utils.OpenInBrowser(card.URL)
-		}
+		m.openURL(m.board.SelectedCard())
+	case m.keys.OpenInGhDash:
+		m.openGhDash(m.board.SelectedCard())
 	}
 	return m, nil
 }
@@ -268,11 +271,37 @@ func (m Model) handleSidebarKey(k string) (tea.Model, tea.Cmd) {
 	case m.keys.Down:
 		m.sidebar.ScrollDown()
 	case m.keys.OpenInBrowser:
-		if card := m.board.SelectedCard(); card != nil && card.URL != "" {
-			_ = utils.OpenInBrowser(card.URL)
-		}
+		m.openURL(m.board.SelectedCard())
+	case m.keys.OpenInGhDash:
+		m.openGhDash(m.board.SelectedCard())
 	}
 	return m, nil
+}
+
+func (m *Model) openURL(card *api.Card) {
+	if card == nil {
+		return
+	}
+	if card.URL == "" {
+		m.status = "no URL — draft issues cannot be opened in browser"
+		return
+	}
+	_ = utils.OpenInBrowser(card.URL)
+}
+
+func (m *Model) openGhDash(card *api.Card) {
+	url := ""
+	if card != nil {
+		url = card.URL
+	}
+	launched, err := utils.OpenInGhDash(url)
+	if err != nil {
+		m.status = "error opening: " + err.Error()
+		return
+	}
+	if !launched {
+		m.status = "gh-dash not found — opening in browser. Install: " + utils.GhDashInstallHint()
+	}
 }
 
 // --- View ---
@@ -321,6 +350,7 @@ func (m Model) helpView() string {
 		"",
 		theme.HelpKey.Render("Actions"),
 		theme.HelpKey.Render("  "+m.keys.OpenInBrowser+"               ") + "  " + theme.HelpDesc.Render("open in browser"),
+		theme.HelpKey.Render("  "+m.keys.OpenInGhDash+"               ") + "  " + theme.HelpDesc.Render("open in gh-dash (install: gh extension install dlvhdr/gh-dash)"),
 		theme.HelpKey.Render("  "+m.keys.Refresh+"               ") + "  " + theme.HelpDesc.Render("refresh"),
 		theme.HelpKey.Render("  "+m.keys.Help+"               ") + "  " + theme.HelpDesc.Render("toggle this help"),
 		theme.HelpKey.Render("  "+m.keys.Quit+"               ") + "  " + theme.HelpDesc.Render("quit"),

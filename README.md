@@ -17,6 +17,17 @@ A keyboard-driven terminal UI for GitHub Projects v2.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Why
+
+Are you too lazy to SWITCH from CLI to the browser like me ? 
+Use lazydash. 
+
+Also thinking of renaming it lazyview, since with alias lazydash = ld, which may already be taken by lazydocker.
+
+Open an issue if you have a better name.
+
+I will be working on this on and off.
+
 ## Install
 
 Requires [gh CLI](https://cli.github.com/) authenticated (`gh auth login`).
@@ -74,6 +85,9 @@ keybindings:
   help: "?"
   quit: q
 ```
+## Contribute
+
+Open to contributions and PRs!
 
 ## License
 
