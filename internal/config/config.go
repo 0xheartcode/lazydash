@@ -19,6 +19,10 @@ type Defaults struct {
 	IgnoreOrgs             []string `yaml:"ignoreOrgs"`
 	OnlyOrgs               []string `yaml:"onlyOrgs"`
 	OnlyProjects           []string `yaml:"onlyProjects"`
+	// Sources selects which backends to enable: "github", "local". Empty means
+	// auto-detect both (GitHub when gh is authenticated, local when the current
+	// repository has git-native issues).
+	Sources []string `yaml:"sources"`
 }
 
 type Keybindings struct {
