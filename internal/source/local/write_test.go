@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/source"
 )
 
@@ -23,10 +24,10 @@ func TestCreateCommentCloseRoundTrip(t *testing.T) {
 	if card.ID == "" {
 		t.Fatal("CreateIssue returned empty id")
 	}
-	if err := s.Comment(card.ID, "Confirmed on a plane."); err != nil {
+	if err := s.Comment(card, "Confirmed on a plane."); err != nil {
 		t.Fatalf("Comment: %v", err)
 	}
-	if err := s.SetState(card.ID, "closed"); err != nil {
+	if err := s.SetState(card, "closed"); err != nil {
 		t.Fatalf("SetState: %v", err)
 	}
 
@@ -63,13 +64,13 @@ func TestSetFieldPriorityAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
-	if err := s.SetField(card.ID, "Priority", "critical"); err != nil {
+	if err := s.SetField(card, "Priority", "critical"); err != nil {
 		t.Fatalf("SetField: %v", err)
 	}
-	if err := s.SetState(card.ID, "closed"); err != nil {
+	if err := s.SetState(card, "closed"); err != nil {
 		t.Fatalf("SetState closed: %v", err)
 	}
-	if err := s.SetState(card.ID, "open"); err != nil {
+	if err := s.SetState(card, "open"); err != nil {
 		t.Fatalf("SetState open: %v", err)
 	}
 
@@ -88,7 +89,7 @@ func TestSetFieldPriorityAndReopen(t *testing.T) {
 func TestAppendEventUnknownIssue(t *testing.T) {
 	dir, _ := newRepo(t)
 	s := &Source{root: dir, name: "x"}
-	if err := s.Comment("does-not-exist", "hi"); err == nil {
+	if err := s.Comment(core.Card{ID: "does-not-exist"}, "hi"); err == nil {
 		t.Error("Comment on a missing issue should error")
 	}
 }

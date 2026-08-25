@@ -645,38 +645,38 @@ func (m Model) submitModal() (tea.Model, tea.Cmd) {
 		if value == "" || card == nil {
 			return m, nil
 		}
-		id := card.ID
-		return run("Adding comment…", func() error { return w.Comment(id, value) })
+		item := *card
+		return run("Adding comment…", func() error { return w.Comment(item, value) })
 	case actMove:
 		if card == nil || value == "" {
 			return m, nil
 		}
-		id, field := card.ID, m.currentGroupField()
-		return run("Moving…", func() error { return w.SetField(id, field, value) })
+		item, field := *card, m.currentGroupField()
+		return run("Moving…", func() error { return w.SetField(item, field, value) })
 	case actLabels:
 		if card == nil {
 			return m, nil
 		}
-		id, labels := card.ID, splitCSV(value)
-		return run("Updating labels…", func() error { return w.SetLabels(id, labels) })
+		item, labels := *card, splitCSV(value)
+		return run("Updating labels…", func() error { return w.SetLabels(item, labels) })
 	case actAssign:
 		if card == nil {
 			return m, nil
 		}
-		id, who := card.ID, splitCSV(value)
-		return run("Updating assignee…", func() error { return w.SetAssignees(id, who) })
+		item, who := *card, splitCSV(value)
+		return run("Updating assignee…", func() error { return w.SetAssignees(item, who) })
 	case actClose:
 		if card == nil {
 			return m, nil
 		}
-		id := card.ID
-		return run("Closing…", func() error { return w.SetState(id, "closed") })
+		item := *card
+		return run("Closing…", func() error { return w.SetState(item, "closed") })
 	case actReopen:
 		if card == nil {
 			return m, nil
 		}
-		id := card.ID
-		return run("Reopening…", func() error { return w.SetState(id, "open") })
+		item := *card
+		return run("Reopening…", func() error { return w.SetState(item, "open") })
 	}
 	return m, nil
 }

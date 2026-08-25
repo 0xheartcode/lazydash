@@ -46,13 +46,17 @@ type Draft struct {
 // Writer is implemented by sources that can mutate issues. The TUI type-asserts
 // a Source to Writer (via AsWriter) and gates each action on the matching
 // Capabilities flag, so a read-only source simply never exposes the action.
+//
+// Item mutations take the whole core.Card rather than a bare id: the local
+// backend keys off Card.ID (the issue UUID) while GitHub keys off Card.URL,
+// and passing the card lets each backend read what it needs without a lookup.
 type Writer interface {
 	CreateIssue(projectID string, d Draft) (core.Card, error)
-	Comment(itemID, body string) error
-	SetState(itemID, state string) error // "open" | "closed"
-	SetField(itemID, field, option string) error
-	SetLabels(itemID string, labels []string) error
-	SetAssignees(itemID string, who []string) error
+	Comment(item core.Card, body string) error
+	SetState(item core.Card, state string) error // "open" | "closed"
+	SetField(item core.Card, field, option string) error
+	SetLabels(item core.Card, labels []string) error
+	SetAssignees(item core.Card, who []string) error
 }
 
 // AsWriter returns the Source as a Writer if it implements one.
