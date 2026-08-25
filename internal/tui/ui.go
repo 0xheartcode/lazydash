@@ -12,7 +12,9 @@ import (
 	"github.com/0xheartcode/lazydash/internal/source/local"
 	"github.com/0xheartcode/lazydash/internal/tui/components/board"
 	"github.com/0xheartcode/lazydash/internal/tui/components/footer"
+	"github.com/0xheartcode/lazydash/internal/tui/components/picker"
 	"github.com/0xheartcode/lazydash/internal/tui/components/projectlist"
+	"github.com/0xheartcode/lazydash/internal/tui/components/prompt"
 	"github.com/0xheartcode/lazydash/internal/tui/components/sidebar"
 	"github.com/0xheartcode/lazydash/internal/tui/keys"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
@@ -38,6 +40,37 @@ type errMsg struct{ err error }
 type tickMsg struct{}
 type sourcesReadyMsg struct{ registry *source.Registry }
 
+// mutationDoneMsg reports the result of a write. On success the owning project
+// is reloaded so the board reflects the change.
+type mutationDoneMsg struct {
+	err    error
+	reload core.Project
+}
+
+// modalMode is the kind of overlay currently capturing input.
+type modalMode int
+
+const (
+	modeNormal modalMode = iota
+	modeInput
+	modePicker
+	modeConfirm
+)
+
+// modalAction is what the open modal will do on submit.
+type modalAction int
+
+const (
+	actNone modalAction = iota
+	actCreate
+	actComment
+	actMove
+	actLabels
+	actAssign
+	actClose
+	actReopen
+)
+
 // --- Model ---
 
 type Model struct {
@@ -58,13 +91,19 @@ type Model struct {
 	projects projectlist.Model
 	board    board.Model
 	sidebar  sidebar.Model
+	prompt   prompt.Model
+	picker   picker.Model
 	footer   footer.Model
 
-	boardData *core.BoardData
-	viewIdx   int
+	boardData     *core.BoardData
+	viewIdx       int
+	activeProject core.Project // the project whose board is loaded
 
 	showHelp    bool
 	showDetails bool
+	mode        modalMode
+	action      modalAction
+	confirm     string // prompt text shown in confirm mode
 }
 
 func (m *Model) setStatus(s string) {
@@ -87,6 +126,8 @@ func newModel(cfg *config.Config) Model {
 		projects: projectlist.New(),
 		board:    board.New(),
 		sidebar:  sidebar.New(),
+		prompt:   prompt.New(),
+		picker:   picker.New(),
 		footer:   footer.New(k),
 	}
 }
@@ -164,10 +205,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("error: " + m.err.Error())
 		return m, nil
 
+	case mutationDoneMsg:
+		if msg.err != nil {
+			m.loading = false
+			m.setStatus("error: " + msg.err.Error())
+			return m, nil
+		}
+		m.loading = true
+		m.setStatus("saved · reloading…")
+		return m, tea.Batch(m.spinner.Tick, fetchBoardCmd(msg.reload, m.registry))
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
+	// While an input modal is open, forward other messages (e.g. cursor blink)
+	// to the field so it keeps updating.
+	if m.mode == modeInput {
+		cmd := m.prompt.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -223,6 +280,16 @@ func (m *Model) layout() {
 		sideH = 4
 	}
 	m.sidebar.SetSize(sideW, sideH)
+
+	modalW := m.width * 60 / 100
+	if modalW < 30 {
+		modalW = 30
+	}
+	if modalW > 80 {
+		modalW = 80
+	}
+	m.prompt.SetWidth(modalW)
+	m.picker.SetWidth(modalW)
 }
 
 func (m *Model) syncActivePane() {
@@ -239,6 +306,11 @@ func (m *Model) syncActivePane() {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+
+	// A write modal captures all keys while open.
+	if m.mode != modeNormal {
+		return m.handleModalKey(msg, k)
+	}
 
 	// The detail overlay captures keys while open: scroll, or dismiss.
 	if m.showDetails {
@@ -296,12 +368,10 @@ func (m Model) handleProjectsKey(k string) (tea.Model, tea.Cmd) {
 	case m.keys.Enter, m.keys.Right:
 		if p := m.projects.Selected(); p != nil {
 			m.loading = true
+			m.activeProject = *p
 			m.setStatus(fmt.Sprintf("Loading %s…", p.Title))
-			offline := false
-			if s := m.registry.ByName(p.Source); s != nil {
-				offline = s.Caps().Offline
-			}
-			m.footer.SetSource(p.Source, offline)
+			caps := m.capsFor(p.Source)
+			m.footer.SetSource(p.Source, caps.Offline, canWrite(caps))
 			return m, tea.Batch(m.spinner.Tick, fetchBoardCmd(*p, m.registry))
 		}
 	}
@@ -336,6 +406,18 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 		m.openURL(m.board.SelectedCard())
 	case m.keys.OpenInGhDash:
 		m.openGhDash(m.board.SelectedCard())
+	case m.keys.Create:
+		return m.startCreate()
+	case m.keys.Comment:
+		return m.startComment()
+	case m.keys.ToggleState:
+		m.startToggleState()
+	case m.keys.Move:
+		m.startMove()
+	case m.keys.Labels:
+		return m.startLabels()
+	case m.keys.Assign:
+		return m.startAssign()
 	}
 	return m, nil
 }
@@ -366,6 +448,284 @@ func (m *Model) openGhDash(card *core.Card) {
 	}
 }
 
+// --- Write actions ---
+
+// canWrite reports whether a source supports any mutation.
+func canWrite(c source.Capabilities) bool {
+	return c.Create || c.Comment || c.SetState || c.SetField || c.Labels || c.Assign
+}
+
+// capsFor returns the capabilities of the named source (zero value if unknown).
+func (m Model) capsFor(name string) source.Capabilities {
+	if m.registry == nil {
+		return source.Capabilities{}
+	}
+	if s := m.registry.ByName(name); s != nil {
+		return s.Caps()
+	}
+	return source.Capabilities{}
+}
+
+func (m Model) activeCaps() source.Capabilities { return m.capsFor(m.activeProject.Source) }
+
+// activeWriter returns the active project's source as a Writer, if it is one.
+func (m Model) activeWriter() (source.Writer, bool) {
+	if m.registry == nil {
+		return nil, false
+	}
+	s := m.registry.ByName(m.activeProject.Source)
+	if s == nil {
+		return nil, false
+	}
+	return source.AsWriter(s)
+}
+
+func (m *Model) openInput(action modalAction, title, placeholder string, multiline bool) tea.Cmd {
+	m.action = action
+	m.mode = modeInput
+	return m.prompt.Open(title, placeholder, multiline)
+}
+
+func (m *Model) openPicker(action modalAction, title string, options []string) {
+	m.action = action
+	m.mode = modePicker
+	m.picker.Open(title, options)
+}
+
+func (m *Model) openConfirm(action modalAction, text string) {
+	m.action = action
+	m.mode = modeConfirm
+	m.confirm = text
+}
+
+func (m *Model) closeModal() {
+	m.mode = modeNormal
+	m.action = actNone
+	m.confirm = ""
+}
+
+func (m Model) startCreate() (tea.Model, tea.Cmd) {
+	if !m.activeCaps().Create {
+		m.setStatus("create not supported by this source")
+		return m, nil
+	}
+	return m, m.openInput(actCreate, "New issue title", "e.g. Fix login crash", false)
+}
+
+func (m Model) startComment() (tea.Model, tea.Cmd) {
+	if !m.activeCaps().Comment || m.board.SelectedCard() == nil {
+		return m, nil
+	}
+	return m, m.openInput(actComment, "Comment", "type a comment", true)
+}
+
+func (m *Model) startToggleState() {
+	if !m.activeCaps().SetState {
+		m.setStatus("state changes not supported by this source")
+		return
+	}
+	card := m.board.SelectedCard()
+	if card == nil {
+		return
+	}
+	title := utils.Truncate(card.Title, 40)
+	if strings.EqualFold(card.State, "closed") {
+		m.openConfirm(actReopen, "Reopen \""+title+"\"?")
+	} else {
+		m.openConfirm(actClose, "Close \""+title+"\"?")
+	}
+}
+
+func (m *Model) startMove() {
+	if !m.activeCaps().SetField || m.board.SelectedCard() == nil {
+		return
+	}
+	field := m.currentGroupField()
+	opts := m.fieldOptions(field)
+	if field == "" || len(opts) == 0 {
+		m.setStatus("no field to move by in this view")
+		return
+	}
+	m.openPicker(actMove, "Move to "+field, opts)
+}
+
+func (m Model) startLabels() (tea.Model, tea.Cmd) {
+	if !m.activeCaps().Labels || m.board.SelectedCard() == nil {
+		return m, nil
+	}
+	return m, m.openInput(actLabels, "Labels (comma-separated)", "bug, auth", false)
+}
+
+func (m Model) startAssign() (tea.Model, tea.Cmd) {
+	if !m.activeCaps().Assign || m.board.SelectedCard() == nil {
+		return m, nil
+	}
+	return m, m.openInput(actAssign, "Assignee", "name or email", false)
+}
+
+func (m Model) handleModalKey(msg tea.KeyMsg, k string) (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeInput:
+		switch k {
+		case "esc":
+			m.closeModal()
+			return m, nil
+		case "enter":
+			if !m.prompt.Multiline() {
+				return m.submitModal()
+			}
+		case "ctrl+d":
+			if m.prompt.Multiline() {
+				return m.submitModal()
+			}
+		}
+		return m, m.prompt.Update(msg)
+	case modePicker:
+		switch k {
+		case "esc":
+			m.closeModal()
+		case m.keys.Up:
+			m.picker.MoveUp()
+		case m.keys.Down:
+			m.picker.MoveDown()
+		case "enter":
+			return m.submitModal()
+		}
+		return m, nil
+	case modeConfirm:
+		switch k {
+		case "y", "enter":
+			return m.submitModal()
+		case "n", "esc":
+			m.closeModal()
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// submitModal dispatches the open modal's action to the active source's Writer
+// and returns a command that performs the mutation and reloads the board.
+func (m Model) submitModal() (tea.Model, tea.Cmd) {
+	action := m.action
+	var value string
+	switch m.mode {
+	case modeInput:
+		value = strings.TrimSpace(m.prompt.Value())
+	case modePicker:
+		value = m.picker.Selected()
+	}
+	card := m.board.SelectedCard()
+	proj := m.activeProject
+	m.closeModal()
+
+	w, ok := m.activeWriter()
+	if !ok {
+		m.setStatus("this source is read-only")
+		return m, nil
+	}
+
+	run := func(status string, fn func() error) (tea.Model, tea.Cmd) {
+		m.loading = true
+		m.setStatus(status)
+		return m, tea.Batch(m.spinner.Tick, mutateCmd(proj, fn))
+	}
+
+	switch action {
+	case actCreate:
+		if value == "" {
+			m.setStatus("create cancelled — empty title")
+			return m, nil
+		}
+		return run("Creating issue…", func() error {
+			_, err := w.CreateIssue(proj.ID, source.Draft{Title: value})
+			return err
+		})
+	case actComment:
+		if value == "" || card == nil {
+			return m, nil
+		}
+		id := card.ID
+		return run("Adding comment…", func() error { return w.Comment(id, value) })
+	case actMove:
+		if card == nil || value == "" {
+			return m, nil
+		}
+		id, field := card.ID, m.currentGroupField()
+		return run("Moving…", func() error { return w.SetField(id, field, value) })
+	case actLabels:
+		if card == nil {
+			return m, nil
+		}
+		id, labels := card.ID, splitCSV(value)
+		return run("Updating labels…", func() error { return w.SetLabels(id, labels) })
+	case actAssign:
+		if card == nil {
+			return m, nil
+		}
+		id, who := card.ID, splitCSV(value)
+		return run("Updating assignee…", func() error { return w.SetAssignees(id, who) })
+	case actClose:
+		if card == nil {
+			return m, nil
+		}
+		id := card.ID
+		return run("Closing…", func() error { return w.SetState(id, "closed") })
+	case actReopen:
+		if card == nil {
+			return m, nil
+		}
+		id := card.ID
+		return run("Reopening…", func() error { return w.SetState(id, "open") })
+	}
+	return m, nil
+}
+
+// currentGroupField is the field the current view groups its columns by.
+func (m Model) currentGroupField() string {
+	if m.boardData == nil || m.viewIdx < 0 || m.viewIdx >= len(m.boardData.Views) {
+		return ""
+	}
+	return m.boardData.Views[m.viewIdx].GroupByField
+}
+
+// fieldOptions returns the option names of a single-select field.
+func (m Model) fieldOptions(field string) []string {
+	if m.boardData == nil || field == "" {
+		return nil
+	}
+	for _, f := range m.boardData.Fields {
+		if f.Name == field {
+			opts := make([]string, 0, len(f.Options))
+			for _, o := range f.Options {
+				opts = append(opts, o.Name)
+			}
+			return opts
+		}
+	}
+	return nil
+}
+
+// mutateCmd runs a write off the UI goroutine and reports the outcome.
+func mutateCmd(proj core.Project, fn func() error) tea.Cmd {
+	return func() tea.Msg {
+		if err := fn(); err != nil {
+			return mutationDoneMsg{err: err}
+		}
+		return mutationDoneMsg{reload: proj}
+	}
+}
+
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // --- View ---
 
 func (m Model) View() string {
@@ -377,6 +737,14 @@ func (m Model) View() string {
 	}
 	if m.showDetails {
 		return m.detailsView()
+	}
+	switch m.mode {
+	case modeInput:
+		return m.overlay(m.prompt.View())
+	case modePicker:
+		return m.overlay(m.picker.View())
+	case modeConfirm:
+		return m.overlay(m.confirmView())
 	}
 
 	var body string
@@ -398,7 +766,22 @@ func (m Model) View() string {
 
 // detailsView renders the selected card's detail panel as a centered overlay.
 func (m Model) detailsView() string {
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.sidebar.View())
+	return m.overlay(m.sidebar.View())
+}
+
+// overlay centers a box over the whole viewport.
+func (m Model) overlay(box string) string {
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// confirmView renders the confirm modal.
+func (m Model) confirmView() string {
+	content := theme.Title.Render(m.confirm) + "\n\n" + theme.Muted.Render("y confirm · n cancel")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.ColorWarning).
+		Padding(1, 3).
+		Render(content)
 }
 
 func (m Model) helpView() string {
@@ -414,6 +797,11 @@ func (m Model) helpView() string {
 		theme.HelpKey.Render("  esc            ") + "  " + theme.HelpDesc.Render("close details / overlay"),
 		"",
 		theme.HelpKey.Render("Actions"),
+		theme.HelpKey.Render("  "+m.keys.Create+"               ") + "  " + theme.HelpDesc.Render("new issue  (writable sources only)"),
+		theme.HelpKey.Render("  "+m.keys.Comment+"               ") + "  " + theme.HelpDesc.Render("comment on selected card"),
+		theme.HelpKey.Render("  "+m.keys.ToggleState+"               ") + "  " + theme.HelpDesc.Render("close / reopen"),
+		theme.HelpKey.Render("  "+m.keys.Move+"               ") + "  " + theme.HelpDesc.Render("move to another column"),
+		theme.HelpKey.Render("  "+m.keys.Labels+" / "+m.keys.Assign+"           ") + "  " + theme.HelpDesc.Render("set labels / assignee"),
 		theme.HelpKey.Render("  "+m.keys.OpenInBrowser+"               ") + "  " + theme.HelpDesc.Render("open in browser"),
 		theme.HelpKey.Render("  "+m.keys.OpenInGhDash+"               ") + "  " + theme.HelpDesc.Render("open in gh-dash  (install: gh extension install dlvhdr/gh-dash)"),
 		theme.HelpKey.Render("  "+m.keys.Refresh+"               ") + "  " + theme.HelpDesc.Render("refresh"),

@@ -14,8 +14,17 @@ import (
 // git runs a git command in dir and returns raw stdout. Stderr is folded into
 // the error so callers get an actionable message. dir must be inside the repo.
 func git(dir string, args ...string) (string, error) {
+	return gitInput(dir, "", args...)
+}
+
+// gitInput is git with data piped to stdin — used for commit-tree (the message)
+// and mktree (empty input yields the empty tree).
+func gitInput(dir, stdin string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
