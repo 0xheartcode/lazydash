@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xheartcode/lazydash/internal/cache"
 	"github.com/0xheartcode/lazydash/internal/config"
 	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/source"
@@ -35,7 +36,10 @@ const (
 // --- Messages ---
 
 type projectsLoadedMsg struct{ projects []core.Project }
-type boardLoadedMsg struct{ data *core.BoardData }
+type boardLoadedMsg struct {
+	data  *core.BoardData
+	stale bool // served from the offline cache because the source was unreachable
+}
 type errMsg struct{ err error }
 type tickMsg struct{}
 type sourcesReadyMsg struct{ registry *source.Registry }
@@ -192,6 +196,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		status := fmt.Sprintf("%d items · %d views", len(msg.data.Items), len(msg.data.Views))
 		if len(msg.data.Items) == 100 {
 			status += "  ⚠ capped at 100 items"
+		}
+		if msg.stale {
+			status = "⚠ offline — showing cached board · " + status
 		}
 		m.setStatus(status)
 		return m, nil
@@ -418,6 +425,8 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 		return m.startLabels()
 	case m.keys.Assign:
 		return m.startAssign()
+	case m.keys.Undo:
+		return m.startUndo()
 	}
 	return m, nil
 }
@@ -478,6 +487,31 @@ func (m Model) activeWriter() (source.Writer, bool) {
 		return nil, false
 	}
 	return source.AsWriter(s)
+}
+
+// activeUndoer returns the active project's source as an Undoer, if it is one.
+func (m Model) activeUndoer() (source.Undoer, bool) {
+	if m.registry == nil {
+		return nil, false
+	}
+	s := m.registry.ByName(m.activeProject.Source)
+	if s == nil {
+		return nil, false
+	}
+	return source.AsUndoer(s)
+}
+
+// startUndo reverses the last change to the selected card, where supported.
+func (m Model) startUndo() (tea.Model, tea.Cmd) {
+	u, ok := m.activeUndoer()
+	card := m.board.SelectedCard()
+	if !ok || card == nil {
+		return m, nil
+	}
+	item, proj := *card, m.activeProject
+	m.loading = true
+	m.setStatus("Undoing…")
+	return m, tea.Batch(m.spinner.Tick, mutateCmd(proj, func() error { return u.Undo(item) }))
 }
 
 func (m *Model) openInput(action modalAction, title, placeholder string, multiline bool) tea.Cmd {
@@ -802,6 +836,7 @@ func (m Model) helpView() string {
 		theme.HelpKey.Render("  "+m.keys.ToggleState+"               ") + "  " + theme.HelpDesc.Render("close / reopen"),
 		theme.HelpKey.Render("  "+m.keys.Move+"               ") + "  " + theme.HelpDesc.Render("move to another column"),
 		theme.HelpKey.Render("  "+m.keys.Labels+" / "+m.keys.Assign+"           ") + "  " + theme.HelpDesc.Render("set labels / assignee"),
+		theme.HelpKey.Render("  "+m.keys.Undo+"               ") + "  " + theme.HelpDesc.Render("undo last change (local issues)"),
 		theme.HelpKey.Render("  "+m.keys.OpenInBrowser+"               ") + "  " + theme.HelpDesc.Render("open in browser"),
 		theme.HelpKey.Render("  "+m.keys.OpenInGhDash+"               ") + "  " + theme.HelpDesc.Render("open in gh-dash  (install: gh extension install dlvhdr/gh-dash)"),
 		theme.HelpKey.Render("  "+m.keys.Refresh+"               ") + "  " + theme.HelpDesc.Render("refresh"),
@@ -899,10 +934,17 @@ func fetchBoardCmd(p core.Project, reg *source.Registry) tea.Cmd {
 		if reg == nil {
 			return errMsg{fmt.Errorf("sources not initialized")}
 		}
+		key := p.Source + "/" + p.ID
 		data, err := reg.GetBoard(p)
 		if err != nil {
+			// Fall back to the last cached copy so the board stays browsable
+			// offline; only error if we have never loaded it.
+			if cached, ok := cache.Load(key); ok {
+				return boardLoadedMsg{data: cached, stale: true}
+			}
 			return errMsg{err}
 		}
-		return boardLoadedMsg{data}
+		_ = cache.Save(key, data)
+		return boardLoadedMsg{data: data}
 	}
 }

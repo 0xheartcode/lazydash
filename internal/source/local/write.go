@@ -12,10 +12,12 @@ import (
 // formatVersion tags issues we create with the git-native-issue format version.
 const formatVersion = "1"
 
-// Compile-time proof the local backend implements both interfaces.
+// Compile-time proof the local backend implements the read, write and undo
+// interfaces.
 var (
 	_ source.Source = (*Source)(nil)
 	_ source.Writer = (*Source)(nil)
+	_ source.Undoer = (*Source)(nil)
 )
 
 // The local backend authors the same commit format its reader parses, so writes
@@ -83,6 +85,26 @@ func (s *Source) SetLabels(item core.Card, labels []string) error {
 // SetAssignees replaces the assignee.
 func (s *Source) SetAssignees(item core.Card, who []string) error {
 	return s.appendEvent(item.ID, "Update assignee", map[string]string{"Assignee": strings.Join(who, ", ")})
+}
+
+// Undo pops the most recent event off an issue's chain by resetting its ref to
+// the tip's parent. Because the chain is append-only this cleanly reverses the
+// last comment or state/field change; the popped commit stays in the object
+// store (recoverable via reflog). The create commit has no parent and cannot be
+// undone this way.
+func (s *Source) Undo(item core.Card) error {
+	ref := issueRefPrefix + item.ID
+	tip, err := git(s.root, "rev-parse", "--verify", ref)
+	if err != nil {
+		return fmt.Errorf("issue %s not found", item.ID)
+	}
+	tip = strings.TrimSpace(tip)
+	parent, err := git(s.root, "rev-parse", "--verify", tip+"^")
+	if err != nil {
+		return fmt.Errorf("nothing to undo — issue has only its creation event")
+	}
+	_, err = git(s.root, "update-ref", ref, strings.TrimSpace(parent), tip)
+	return err
 }
 
 // appendEvent commits a new event (subject plus optional trailers) onto the tip

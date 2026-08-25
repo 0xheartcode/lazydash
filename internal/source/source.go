@@ -64,3 +64,16 @@ func AsWriter(s Source) (Writer, bool) {
 	w, ok := s.(Writer)
 	return w, ok
 }
+
+// Undoer is implemented by sources that can reverse the last change to an item.
+// The local backend can (an issue is an append-only commit chain, so undo is a
+// ref reset); GitHub cannot, so it simply does not implement this.
+type Undoer interface {
+	Undo(item core.Card) error
+}
+
+// AsUndoer returns the Source as an Undoer if it implements one.
+func AsUndoer(s Source) (Undoer, bool) {
+	u, ok := s.(Undoer)
+	return u, ok
+}

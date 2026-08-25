@@ -39,6 +39,7 @@ type Keybindings struct {
 	Move          string `yaml:"move"`
 	Labels        string `yaml:"labels"`
 	Assign        string `yaml:"assign"`
+	Undo          string `yaml:"undo"`
 }
 
 func defaults() Config {
@@ -61,6 +62,7 @@ func defaults() Config {
 			Move:          "M",
 			Labels:        "L",
 			Assign:        "a",
+			Undo:          "u",
 		},
 	}
 }
@@ -111,6 +113,7 @@ func Load(flagPath string) (*Config, error) {
 	fill(&kb.Move, d.Move)
 	fill(&kb.Labels, d.Labels)
 	fill(&kb.Assign, d.Assign)
+	fill(&kb.Undo, d.Undo)
 	return &cfg, nil
 }
 
