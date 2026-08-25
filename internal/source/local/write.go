@@ -12,6 +12,12 @@ import (
 // formatVersion tags issues we create with the git-native-issue format version.
 const formatVersion = "1"
 
+// Compile-time proof the local backend implements both interfaces.
+var (
+	_ source.Source = (*Source)(nil)
+	_ source.Writer = (*Source)(nil)
+)
+
 // The local backend authors the same commit format its reader parses, so writes
 // need no external binary and work fully offline. Each mutation is one commit
 // under refs/issues/<id>: a create commit roots a new chain, everything else is
@@ -41,42 +47,42 @@ func (s *Source) CreateIssue(_ string, d source.Draft) (core.Card, error) {
 }
 
 // Comment appends a comment event.
-func (s *Source) Comment(itemID, body string) error {
+func (s *Source) Comment(item core.Card, body string) error {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return fmt.Errorf("empty comment")
 	}
-	return s.appendEvent(itemID, body, nil)
+	return s.appendEvent(item.ID, body, nil)
 }
 
 // SetState closes or reopens an issue by appending a state event.
-func (s *Source) SetState(itemID, state string) error {
+func (s *Source) SetState(item core.Card, state string) error {
 	state = strings.ToLower(strings.TrimSpace(state))
 	subject := "Reopen issue"
 	if state == "closed" {
 		subject = "Close issue"
 	}
-	return s.appendEvent(itemID, subject, map[string]string{"State": state})
+	return s.appendEvent(item.ID, subject, map[string]string{"State": state})
 }
 
 // SetField sets a single-select field. State maps to close/reopen; every other
 // field is recorded as a trailer of the same (canonicalised) name.
-func (s *Source) SetField(itemID, field, option string) error {
+func (s *Source) SetField(item core.Card, field, option string) error {
 	if strings.EqualFold(field, "State") {
-		return s.SetState(itemID, option)
+		return s.SetState(item, option)
 	}
 	key := canonicalTrailerKey(field)
-	return s.appendEvent(itemID, "Set "+key+": "+option, map[string]string{key: option})
+	return s.appendEvent(item.ID, "Set "+key+": "+option, map[string]string{key: option})
 }
 
 // SetLabels replaces the label set.
-func (s *Source) SetLabels(itemID string, labels []string) error {
-	return s.appendEvent(itemID, "Update labels", map[string]string{"Labels": strings.Join(labels, ", ")})
+func (s *Source) SetLabels(item core.Card, labels []string) error {
+	return s.appendEvent(item.ID, "Update labels", map[string]string{"Labels": strings.Join(labels, ", ")})
 }
 
 // SetAssignees replaces the assignee.
-func (s *Source) SetAssignees(itemID string, who []string) error {
-	return s.appendEvent(itemID, "Update assignee", map[string]string{"Assignee": strings.Join(who, ", ")})
+func (s *Source) SetAssignees(item core.Card, who []string) error {
+	return s.appendEvent(item.ID, "Update assignee", map[string]string{"Assignee": strings.Join(who, ", ")})
 }
 
 // appendEvent commits a new event (subject plus optional trailers) onto the tip

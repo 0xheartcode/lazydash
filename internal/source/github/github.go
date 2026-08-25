@@ -23,10 +23,11 @@ type Options struct {
 
 // Source is the GitHub Projects v2 backend.
 type Source struct {
-	client *api.Client
-	login  string
-	orgs   []string
-	opts   Options
+	client   *api.Client
+	login    string
+	orgs     []string
+	opts     Options
+	writable bool // gh binary present, so mutations can be shelled out
 }
 
 // New builds the GitHub source from the current gh auth context. It resolves
@@ -43,20 +44,26 @@ func New(opts Options) (*Source, error) {
 	}
 	discovered, _ := client.ListViewerOrgs() // best-effort; org discovery is optional
 	return &Source{
-		client: client,
-		login:  login,
-		orgs:   mergeOrgs(discovered, opts.Orgs),
-		opts:   opts,
+		client:   client,
+		login:    login,
+		orgs:     mergeOrgs(discovered, opts.Orgs),
+		opts:     opts,
+		writable: ghAvailable(),
 	}, nil
 }
 
 // Name identifies this backend.
 func (s *Source) Name() string { return "github" }
 
-// Caps reports GitHub's capabilities. Write flags are turned on as the
-// corresponding mutations land in later commits.
+// Caps reports GitHub's capabilities. Comment and close/reopen are available
+// when the gh binary is present; card moves and other field edits land in a
+// later commit.
 func (s *Source) Caps() source.Capabilities {
-	return source.Capabilities{Offline: false}
+	return source.Capabilities{
+		Offline:  false,
+		Comment:  s.writable,
+		SetState: s.writable,
+	}
 }
 
 // ListProjects returns the viewer's projects plus the effective orgs' projects,
