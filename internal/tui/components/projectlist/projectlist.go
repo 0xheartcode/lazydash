@@ -77,6 +77,10 @@ func (m Model) View() string {
 		scrollOffset = m.cursor - listH + 1
 	}
 
+	// Show a source badge only when projects come from more than one backend,
+	// so a single-source list stays uncluttered.
+	badges := hasMultipleSources(m.projects)
+
 	for i, p := range m.projects {
 		if i < scrollOffset {
 			continue
@@ -88,12 +92,21 @@ func (m Model) View() string {
 		if p.Owner != "" {
 			label = p.Owner + "/" + p.Title
 		}
-		name := utils.Truncate(label, innerW-3)
+		badge := ""
+		avail := innerW - 3
+		if badges {
+			badge = sourceBadge(p.Source)
+			avail -= lipgloss.Width(badge)
+		}
+		if avail < 1 {
+			avail = 1
+		}
+		name := utils.Truncate(label, avail)
 		var row string
 		if i == m.cursor {
-			row = theme.CardCursor.Render("> ") + theme.CardSelected.Render(name)
+			row = theme.CardCursor.Render("> ") + badge + theme.CardSelected.Render(name)
 		} else {
-			row = "  " + theme.CardTitle.Render(name)
+			row = "  " + badge + theme.CardTitle.Render(name)
 		}
 		lines = append(lines, row)
 	}
@@ -117,3 +130,38 @@ func (m Model) TabTitle() string {
 
 // Render wraps lipgloss width for external callers.
 func Width(s string) int { return lipgloss.Width(s) }
+
+// hasMultipleSources reports whether the projects span more than one backend.
+func hasMultipleSources(projects []core.Project) bool {
+	seen := ""
+	for _, p := range projects {
+		if p.Source == "" {
+			continue
+		}
+		if seen == "" {
+			seen = p.Source
+		} else if p.Source != seen {
+			return true
+		}
+	}
+	return false
+}
+
+// sourceBadge renders a fixed-width, colored tag for a project's backend so
+// names stay aligned regardless of which source a row came from.
+func sourceBadge(src string) string {
+	var text string
+	var color lipgloss.Color
+	switch src {
+	case "local":
+		text, color = "local", theme.ColorSuccess
+	case "github":
+		text, color = "gh", theme.ColorSecondary
+	default:
+		return strings.Repeat(" ", 6)
+	}
+	if len(text) < 5 {
+		text += strings.Repeat(" ", 5-len(text))
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(text) + " "
+}
