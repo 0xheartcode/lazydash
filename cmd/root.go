@@ -12,9 +12,12 @@ import (
 var cfgPath string
 
 var rootCmd = &cobra.Command{
-	Use:          "lazydash",
-	Short:        "A terminal UI for GitHub Projects v2",
-	Long:         `lazydash is a keyboard-driven terminal UI for browsing GitHub Projects v2 boards.`,
+	Use:   "lazydash",
+	Short: "A terminal UI for GitHub Projects and local git-native issues",
+	Long: `lazydash is a keyboard-driven terminal UI for browsing and managing issues:
+GitHub Projects boards and local git-native issues (stored in the repo under
+refs/issues/). Run it inside a repository to work with local issues fully
+offline, or anywhere to browse and edit your GitHub Projects.`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(cfgPath)
