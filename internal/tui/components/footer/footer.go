@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const version = "v0.1.0"
+const version = "v0.2.0"
 
 type Pane int
 
