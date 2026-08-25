@@ -5,6 +5,7 @@ package github
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/core"
@@ -28,6 +29,14 @@ type Source struct {
 	orgs     []string
 	opts     Options
 	writable bool // gh binary present, so mutations can be shelled out
+
+	// Field-id cache from the most recently loaded board, used to translate a
+	// field/option name into the ids `gh project item-edit` needs. Guarded by mu
+	// because GetBoard (load) and SetField (mutate) run on different goroutines.
+	mu         sync.Mutex
+	lastProjID string
+	fieldIDs   map[string]string            // fieldName -> fieldID
+	optionIDs  map[string]map[string]string // fieldName -> optionName -> optionID
 }
 
 // New builds the GitHub source from the current gh auth context. It resolves
@@ -55,14 +64,14 @@ func New(opts Options) (*Source, error) {
 // Name identifies this backend.
 func (s *Source) Name() string { return "github" }
 
-// Caps reports GitHub's capabilities. Comment and close/reopen are available
-// when the gh binary is present; card moves and other field edits land in a
-// later commit.
+// Caps reports GitHub's capabilities: comment, close/reopen and card moves
+// (single-select field edits) when the gh binary is present.
 func (s *Source) Caps() source.Capabilities {
 	return source.Capabilities{
 		Offline:  false,
 		Comment:  s.writable,
 		SetState: s.writable,
+		SetField: s.writable,
 	}
 }
 
@@ -103,9 +112,15 @@ func (s *Source) ListProjects() ([]core.Project, error) {
 	return projects, nil
 }
 
-// GetBoard loads a project's board from GitHub.
+// GetBoard loads a project's board from GitHub and caches its field/option ids
+// so a later card move can resolve names back to ids.
 func (s *Source) GetBoard(projectID string) (*core.BoardData, error) {
-	return s.client.GetProjectBoard(projectID)
+	bd, err := s.client.GetProjectBoard(projectID)
+	if err != nil {
+		return nil, err
+	}
+	s.cacheFieldIDs(projectID, bd)
+	return bd, nil
 }
 
 // mergeOrgs unions discovered and configured orgs, case-insensitively deduped,
