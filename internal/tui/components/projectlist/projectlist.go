@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/0xheartcode/lazydash/internal/api"
+	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/0xheartcode/lazydash/internal/utils"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type Model struct {
-	projects []api.Project
+	projects []core.Project
 	cursor   int
 	width    int
 	height   int
@@ -22,7 +22,7 @@ func New() Model {
 	return Model{}
 }
 
-func (m *Model) SetProjects(p []api.Project) {
+func (m *Model) SetProjects(p []core.Project) {
 	m.projects = p
 	if m.cursor >= len(p) {
 		m.cursor = 0
@@ -44,7 +44,7 @@ func (m *Model) MoveDown() {
 	}
 }
 
-func (m Model) Selected() *api.Project {
+func (m Model) Selected() *core.Project {
 	if len(m.projects) == 0 || m.cursor >= len(m.projects) {
 		return nil
 	}

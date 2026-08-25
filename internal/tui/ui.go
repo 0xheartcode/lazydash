@@ -7,6 +7,7 @@ import (
 
 	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/config"
+	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/components/board"
 	"github.com/0xheartcode/lazydash/internal/tui/components/footer"
 	"github.com/0xheartcode/lazydash/internal/tui/components/projectlist"
@@ -28,8 +29,8 @@ const (
 
 // --- Messages ---
 
-type projectsLoadedMsg struct{ projects []api.Project }
-type boardLoadedMsg struct{ data *api.BoardData }
+type projectsLoadedMsg struct{ projects []core.Project }
+type boardLoadedMsg struct{ data *core.BoardData }
 type errMsg struct{ err error }
 type tickMsg struct{}
 type clientReadyMsg struct {
@@ -60,7 +61,7 @@ type Model struct {
 	board    board.Model
 	footer   footer.Model
 
-	boardData *api.BoardData
+	boardData *core.BoardData
 	viewIdx   int
 
 	showHelp bool
@@ -197,17 +198,17 @@ func (m *Model) applyView(idx int) {
 	m.board.SetLayout(view.Layout)
 	m.board.SetViews(m.boardData.Views, idx)
 	m.board.SetVisibleFields(view.VisibleFields)
-	m.board.SetOptionColors(api.OptionColors(m.boardData))
+	m.board.SetOptionColors(core.OptionColors(m.boardData))
 	m.footer.SetBoardLayout(view.Layout)
 
 	if view.Layout == "TABLE_LAYOUT" || view.Layout == "ROADMAP_LAYOUT" {
-		m.board.SetTableItems(api.FlatItems(m.boardData))
+		m.board.SetTableItems(core.FlatItems(m.boardData))
 	} else {
 		fieldName := view.GroupByField
 		if fieldName == "" {
 			fieldName = "Status"
 		}
-		m.board.SetColumns(api.GroupByField(m.boardData, fieldName))
+		m.board.SetColumns(core.GroupByField(m.boardData, fieldName))
 	}
 }
 
@@ -313,7 +314,7 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) openURL(card *api.Card) {
+func (m *Model) openURL(card *core.Card) {
 	if card == nil {
 		return
 	}
@@ -324,7 +325,7 @@ func (m *Model) openURL(card *api.Card) {
 	_ = utils.OpenInBrowser(card.URL)
 }
 
-func (m *Model) openGhDash(card *api.Card) {
+func (m *Model) openGhDash(card *core.Card) {
 	url := ""
 	if card != nil {
 		url = card.URL
@@ -378,11 +379,11 @@ func (m Model) helpView() string {
 		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("load selected project"),
 		"",
 		theme.HelpKey.Render("Actions"),
-		theme.HelpKey.Render("  " + m.keys.OpenInBrowser + "               ") + "  " + theme.HelpDesc.Render("open in browser"),
-		theme.HelpKey.Render("  " + m.keys.OpenInGhDash + "               ") + "  " + theme.HelpDesc.Render("open in gh-dash  (install: gh extension install dlvhdr/gh-dash)"),
-		theme.HelpKey.Render("  " + m.keys.Refresh + "               ") + "  " + theme.HelpDesc.Render("refresh"),
-		theme.HelpKey.Render("  " + m.keys.Help + "               ") + "  " + theme.HelpDesc.Render("toggle this help"),
-		theme.HelpKey.Render("  " + m.keys.Quit + "               ") + "  " + theme.HelpDesc.Render("quit"),
+		theme.HelpKey.Render("  "+m.keys.OpenInBrowser+"               ") + "  " + theme.HelpDesc.Render("open in browser"),
+		theme.HelpKey.Render("  "+m.keys.OpenInGhDash+"               ") + "  " + theme.HelpDesc.Render("open in gh-dash  (install: gh extension install dlvhdr/gh-dash)"),
+		theme.HelpKey.Render("  "+m.keys.Refresh+"               ") + "  " + theme.HelpDesc.Render("refresh"),
+		theme.HelpKey.Render("  "+m.keys.Help+"               ") + "  " + theme.HelpDesc.Render("toggle this help"),
+		theme.HelpKey.Render("  "+m.keys.Quit+"               ") + "  " + theme.HelpDesc.Render("quit"),
 	}
 
 	content := strings.Join(rows, "\n")
@@ -478,7 +479,7 @@ func isIgnored(name string, list []string) bool {
 	return false
 }
 
-func filterIgnoredProjects(projects []api.Project, ignore []string) []api.Project {
+func filterIgnoredProjects(projects []core.Project, ignore []string) []core.Project {
 	if len(ignore) == 0 {
 		return projects
 	}
@@ -486,7 +487,7 @@ func filterIgnoredProjects(projects []api.Project, ignore []string) []api.Projec
 	for i, p := range ignore {
 		lower[i] = strings.ToLower(p)
 	}
-	var out []api.Project
+	var out []core.Project
 	for _, p := range projects {
 		ownerTitle := strings.ToLower(p.Owner + "/" + p.Title)
 		bare := strings.ToLower(p.Title)
@@ -504,7 +505,7 @@ func filterIgnoredProjects(projects []api.Project, ignore []string) []api.Projec
 	return out
 }
 
-func filterAllowedProjects(projects []api.Project, only []string) []api.Project {
+func filterAllowedProjects(projects []core.Project, only []string) []core.Project {
 	if len(only) == 0 {
 		return projects
 	}
@@ -512,7 +513,7 @@ func filterAllowedProjects(projects []api.Project, only []string) []api.Project 
 	for i, p := range only {
 		lower[i] = strings.ToLower(p)
 	}
-	var out []api.Project
+	var out []core.Project
 	for _, p := range projects {
 		ownerTitle := strings.ToLower(p.Owner + "/" + p.Title)
 		bare := strings.ToLower(p.Title)
