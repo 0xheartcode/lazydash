@@ -5,9 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xheartcode/lazydash/internal/api"
 	"github.com/0xheartcode/lazydash/internal/config"
 	"github.com/0xheartcode/lazydash/internal/core"
+	"github.com/0xheartcode/lazydash/internal/source"
+	"github.com/0xheartcode/lazydash/internal/source/github"
 	"github.com/0xheartcode/lazydash/internal/tui/components/board"
 	"github.com/0xheartcode/lazydash/internal/tui/components/footer"
 	"github.com/0xheartcode/lazydash/internal/tui/components/projectlist"
@@ -33,18 +34,15 @@ type projectsLoadedMsg struct{ projects []core.Project }
 type boardLoadedMsg struct{ data *core.BoardData }
 type errMsg struct{ err error }
 type tickMsg struct{}
-type clientReadyMsg struct {
-	login  string
-	orgs   []string
-	client *api.Client
-}
+type sourcesReadyMsg struct{ registry *source.Registry }
 
 // --- Model ---
 
 type Model struct {
-	cfg    *config.Config
-	keys   keys.Bindings
-	client *api.Client
+	cfg  *config.Config
+	keys keys.Bindings
+
+	registry *source.Registry
 
 	width  int
 	height int
@@ -55,8 +53,6 @@ type Model struct {
 	err     error
 	status  string
 
-	login    string
-	orgs     []string
 	projects projectlist.Model
 	board    board.Model
 	footer   footer.Model
@@ -98,7 +94,7 @@ func Start(cfg *config.Config) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchLoginCmd())
+	return tea.Batch(m.spinner.Tick, initSourcesCmd(m.cfg))
 }
 
 // --- Update ---
@@ -120,11 +116,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case clientReadyMsg:
-		m.client = msg.client
-		m.login = msg.login
-		m.orgs = mergeOrgs(msg.orgs, m.cfg.Defaults.Orgs)
-		m.setStatus(fmt.Sprintf("Loading projects for %s…", m.login))
+	case sourcesReadyMsg:
+		m.registry = msg.registry
+		m.setStatus("Loading projects…")
 		return m, m.fetchProjects()
 
 	case projectsLoadedMsg:
@@ -170,19 +164,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-func mergeOrgs(discovered, configured []string) []string {
-	seen := make(map[string]bool)
-	var merged []string
-	for _, o := range append(append([]string(nil), discovered...), configured...) {
-		lo := strings.ToLower(o)
-		if !seen[lo] {
-			seen[lo] = true
-			merged = append(merged, o)
-		}
-	}
-	return merged
 }
 
 func (m *Model) applyView(idx int) {
@@ -282,7 +263,7 @@ func (m Model) handleProjectsKey(k string) (tea.Model, tea.Cmd) {
 		if p := m.projects.Selected(); p != nil {
 			m.loading = true
 			m.setStatus(fmt.Sprintf("Loading %s…", p.Title))
-			return m, tea.Batch(m.spinner.Tick, fetchBoardCmd(p.ID, m.client))
+			return m, tea.Batch(m.spinner.Tick, fetchBoardCmd(*p, m.registry))
 		}
 	}
 	return m, nil
@@ -398,19 +379,19 @@ func (m Model) helpView() string {
 
 // --- Commands ---
 
-func fetchLoginCmd() tea.Cmd {
+func initSourcesCmd(cfg *config.Config) tea.Cmd {
 	return func() tea.Msg {
-		client, err := api.NewClient()
+		gh, err := github.New(github.Options{
+			Orgs:           cfg.Defaults.Orgs,
+			IgnoreOrgs:     cfg.Defaults.IgnoreOrgs,
+			IgnoreProjects: cfg.Defaults.IgnoreProjects,
+			OnlyOrgs:       cfg.Defaults.OnlyOrgs,
+			OnlyProjects:   cfg.Defaults.OnlyProjects,
+		})
 		if err != nil {
 			return errMsg{err}
 		}
-		login, err := client.ViewerLogin()
-		if err != nil {
-			return errMsg{err}
-		}
-		// Auto-discover org memberships (best-effort — no error on failure).
-		orgs, _ := client.ListViewerOrgs()
-		return clientReadyMsg{login: login, orgs: orgs, client: client}
+		return sourcesReadyMsg{registry: source.NewRegistry(gh)}
 	}
 }
 
@@ -423,116 +404,25 @@ func (m Model) scheduleRefresh() tea.Cmd {
 }
 
 func (m Model) fetchProjects() tea.Cmd {
-	client := m.client
-	login := m.login
-	orgs := m.orgs
-	ignoreOrgs := m.cfg.Defaults.IgnoreOrgs
-	ignoreProjects := m.cfg.Defaults.IgnoreProjects
-	onlyOrgs := m.cfg.Defaults.OnlyOrgs
-	onlyProjects := m.cfg.Defaults.OnlyProjects
+	reg := m.registry
 	return func() tea.Msg {
-		if client == nil {
-			return errMsg{fmt.Errorf("client not initialized")}
+		if reg == nil {
+			return errMsg{fmt.Errorf("sources not initialized")}
 		}
-		projects, err := client.ListUserProjects(login)
+		projects, err := reg.ListProjects()
 		if err != nil {
 			return errMsg{err}
-		}
-
-		// Step 1 — determine effective org list.
-		var effectiveOrgs []string
-		if len(onlyOrgs) > 0 {
-			effectiveOrgs = onlyOrgs
-		} else {
-			for _, org := range orgs {
-				if !isIgnored(org, ignoreOrgs) {
-					effectiveOrgs = append(effectiveOrgs, org)
-				}
-			}
-		}
-
-		// Step 2 — fetch all effective org projects.
-		for _, org := range effectiveOrgs {
-			orgProjects, err := client.ListOrgProjects(org)
-			if err == nil {
-				projects = append(projects, orgProjects...)
-			}
-		}
-
-		// Step 3 — filter final project list.
-		if len(onlyProjects) > 0 {
-			projects = filterAllowedProjects(projects, onlyProjects)
-		} else {
-			projects = filterIgnoredProjects(projects, ignoreProjects)
 		}
 		return projectsLoadedMsg{projects}
 	}
 }
 
-func isIgnored(name string, list []string) bool {
-	lower := strings.ToLower(name)
-	for _, item := range list {
-		if strings.ToLower(item) == lower {
-			return true
-		}
-	}
-	return false
-}
-
-func filterIgnoredProjects(projects []core.Project, ignore []string) []core.Project {
-	if len(ignore) == 0 {
-		return projects
-	}
-	lower := make([]string, len(ignore))
-	for i, p := range ignore {
-		lower[i] = strings.ToLower(p)
-	}
-	var out []core.Project
-	for _, p := range projects {
-		ownerTitle := strings.ToLower(p.Owner + "/" + p.Title)
-		bare := strings.ToLower(p.Title)
-		skip := false
-		for _, lp := range lower {
-			if lp == ownerTitle || lp == bare {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func filterAllowedProjects(projects []core.Project, only []string) []core.Project {
-	if len(only) == 0 {
-		return projects
-	}
-	lower := make([]string, len(only))
-	for i, p := range only {
-		lower[i] = strings.ToLower(p)
-	}
-	var out []core.Project
-	for _, p := range projects {
-		ownerTitle := strings.ToLower(p.Owner + "/" + p.Title)
-		bare := strings.ToLower(p.Title)
-		for _, lp := range lower {
-			if lp == ownerTitle || lp == bare {
-				out = append(out, p)
-				break
-			}
-		}
-	}
-	return out
-}
-
-func fetchBoardCmd(projectID string, client *api.Client) tea.Cmd {
+func fetchBoardCmd(p core.Project, reg *source.Registry) tea.Cmd {
 	return func() tea.Msg {
-		if client == nil {
-			return errMsg{fmt.Errorf("client not initialized")}
+		if reg == nil {
+			return errMsg{fmt.Errorf("sources not initialized")}
 		}
-		data, err := client.GetProjectBoard(projectID)
+		data, err := reg.GetBoard(p)
 		if err != nil {
 			return errMsg{err}
 		}

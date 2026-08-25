@@ -13,6 +13,7 @@ type Project struct {
 	Description string
 	URL         string
 	UpdatedAt   string
+	Source      string // name of the source that owns this project (e.g. "github", "local")
 }
 
 // Column is a named group of cards on a board view.
