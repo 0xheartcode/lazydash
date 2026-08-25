@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/0xheartcode/lazydash/internal/api"
+	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type Model struct {
-	card     *api.Card
+	card     *core.Card
 	viewport viewport.Model
 	width    int
 	height   int
@@ -46,7 +46,7 @@ func (m *Model) SetSize(w, h int) {
 	}
 }
 
-func (m *Model) SetCard(card *api.Card) {
+func (m *Model) SetCard(card *core.Card) {
 	m.card = card
 	if m.ready && card != nil {
 		m.viewport.SetContent(m.buildContent(m.width - 4))

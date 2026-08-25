@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/0xheartcode/lazydash/internal/api"
+	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/0xheartcode/lazydash/internal/utils"
 	"github.com/charmbracelet/lipgloss"
@@ -15,20 +15,20 @@ type Model struct {
 	width   int
 	height  int
 	active  bool
-	views   []api.ProjectView
+	views   []core.ProjectView
 	viewIdx int
 	layout  string // BOARD_LAYOUT | TABLE_LAYOUT
 
 	// board mode
-	columns []api.Column
+	columns []core.Column
 	colIdx  int
 	cardIdx int
 
 	// table mode
-	tableItems    []api.Card
+	tableItems    []core.Card
 	tableRow      int
 	tableScroll   int
-	visibleFields []api.VisibleField
+	visibleFields []core.VisibleField
 	optionColors  map[string]map[string]string // fieldName → optionName → terminal color
 }
 
@@ -36,24 +36,24 @@ func New() Model { return Model{layout: "BOARD_LAYOUT"} }
 
 // --- Setters ---
 
-func (m *Model) SetLayout(layout string)               { m.layout = layout }
-func (m *Model) SetSize(w, h int)                      { m.width = w; m.height = h }
-func (m *Model) SetActive(a bool)                      { m.active = a }
-func (m *Model) SetViews(views []api.ProjectView, idx int) { m.views = views; m.viewIdx = idx }
+func (m *Model) SetLayout(layout string)                    { m.layout = layout }
+func (m *Model) SetSize(w, h int)                           { m.width = w; m.height = h }
+func (m *Model) SetActive(a bool)                           { m.active = a }
+func (m *Model) SetViews(views []core.ProjectView, idx int) { m.views = views; m.viewIdx = idx }
 
-func (m *Model) SetColumns(cols []api.Column) {
+func (m *Model) SetColumns(cols []core.Column) {
 	m.columns = cols
 	m.colIdx = 0
 	m.cardIdx = 0
 }
 
-func (m *Model) SetTableItems(items []api.Card) {
+func (m *Model) SetTableItems(items []core.Card) {
 	m.tableItems = items
 	m.tableRow = 0
 	m.tableScroll = 0
 }
 
-func (m *Model) SetVisibleFields(fields []api.VisibleField) { m.visibleFields = fields }
+func (m *Model) SetVisibleFields(fields []core.VisibleField)         { m.visibleFields = fields }
 func (m *Model) SetOptionColors(colors map[string]map[string]string) { m.optionColors = colors }
 
 // --- Navigation ---
@@ -113,7 +113,7 @@ func (m *Model) MoveRight() {
 	}
 }
 
-func (m Model) SelectedCard() *api.Card {
+func (m Model) SelectedCard() *core.Card {
 	if m.layout == "TABLE_LAYOUT" {
 		if len(m.tableItems) == 0 || m.tableRow >= len(m.tableItems) {
 			return nil
@@ -330,7 +330,7 @@ func itemIcon(itemType, state string) string {
 	}
 }
 
-func renderLabels(labels []api.Label, width int) string {
+func renderLabels(labels []core.Label, width int) string {
 	if len(labels) == 0 {
 		return strings.Repeat(" ", width)
 	}
@@ -463,7 +463,7 @@ func (m Model) renderTabBar(width int) string {
 	return bar + strings.Repeat(" ", gap) + hint
 }
 
-func renderColumn(col api.Column, active bool, selectedCard, width, height int) string {
+func renderColumn(col core.Column, active bool, selectedCard, width, height int) string {
 	cardW := width - 2
 	header := theme.ColumnHeader.Width(cardW).Render(
 		utils.Truncate(col.Name, cardW) + fmt.Sprintf(" (%d)", len(col.Cards)),
@@ -501,4 +501,3 @@ func renderColumn(col api.Column, active bool, selectedCard, width, height int) 
 	}
 	return colStyle.Render(strings.Join(lines, "\n"))
 }
-

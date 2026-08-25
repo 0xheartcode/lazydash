@@ -1,180 +1,15 @@
+// Package api is the GitHub Projects v2 data source: it wraps the go-gh GraphQL
+// client and maps GitHub's schema onto lazydash's backend-neutral core model.
 package api
 
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
+	"github.com/0xheartcode/lazydash/internal/core"
 	goggh "github.com/cli/go-gh/v2/pkg/api"
 	graphql "github.com/cli/shurcooL-graphql"
 )
-
-// Project represents a GitHub Projects v2 project.
-type Project struct {
-	ID          string
-	Number      int
-	Title       string
-	Owner       string
-	Description string
-	URL         string
-	UpdatedAt   string
-}
-
-// Column is a named group of cards on a board view.
-type Column struct {
-	Name  string
-	Cards []Card
-}
-
-// Label holds a GitHub issue label with its display color.
-type Label struct {
-	Name  string
-	Color string // hex color without '#', e.g. "d73a4a"
-}
-
-// Card is a single item on the board.
-type Card struct {
-	ID          string
-	Type        string // ISSUE | PULL_REQUEST | DRAFT_ISSUE
-	Number      int
-	Title       string
-	State       string
-	URL         string
-	Repo        string
-	Assignees   []string
-	Labels      []Label
-	Status      string
-	Body        string
-	FieldValues map[string]string // all field values keyed by field name
-}
-
-// VisibleField is a field configured to be shown in a view.
-type VisibleField struct {
-	ID       string
-	Name     string
-	DataType string // TITLE | ASSIGNEES | SINGLE_SELECT | DATE | NUMBER | TEXT | ITERATION | MILESTONE | REPOSITORY | LABELS | LINKED_PULL_REQUESTS
-}
-
-// ProjectView mirrors a saved view from GitHub Projects v2.
-type ProjectView struct {
-	ID            string
-	Name          string
-	Layout        string // BOARD_LAYOUT | TABLE_LAYOUT | ROADMAP_LAYOUT
-	GroupByField  string
-	VisibleFields []VisibleField
-}
-
-// FieldOption is one option of a single-select field, including its GitHub color enum.
-type FieldOption struct {
-	Name  string
-	Color string // GitHub enum: GRAY | BLUE | GREEN | YELLOW | ORANGE | RED | PINK | PURPLE
-}
-
-// SelectField is a single-select field with ordered options.
-type SelectField struct {
-	ID      string
-	Name    string
-	Options []FieldOption
-}
-
-// RawItem is an ungrouped project item with all its field values.
-type RawItem struct {
-	ID          string
-	Type        string
-	IsArchived  bool
-	Number      int
-	Title       string
-	State       string
-	URL         string
-	Repo        string
-	Assignees   []string
-	Labels      []Label
-	Body        string
-	FieldValues map[string]string // field name → selected option name
-}
-
-// BoardData holds everything fetched from a project in one call.
-// Grouping into columns is done client-side via GroupByField.
-type BoardData struct {
-	Views  []ProjectView
-	Fields []SelectField
-	Items  []RawItem
-}
-
-// GroupByField buckets RawItems into Columns using the named single-select field.
-// Column order follows the field's option order. Falls back to "No <field>" bucket.
-func GroupByField(data *BoardData, fieldName string) []Column {
-	// Find the field's ordered options.
-	var options []string
-	for _, f := range data.Fields {
-		if f.Name == fieldName {
-			for _, o := range f.Options {
-				options = append(options, o.Name)
-			}
-			break
-		}
-	}
-	noGroup := "No " + fieldName
-	if len(options) == 0 {
-		options = []string{noGroup}
-	}
-
-	buckets := make(map[string][]Card, len(options)+1)
-	for _, opt := range options {
-		buckets[opt] = nil
-	}
-
-	for _, item := range data.Items {
-		if item.IsArchived {
-			continue
-		}
-		card := Card{
-			ID:          item.ID,
-			Type:        item.Type,
-			Number:      item.Number,
-			Title:       item.Title,
-			State:       item.State,
-			URL:         item.URL,
-			Repo:        item.Repo,
-			Assignees:   item.Assignees,
-			Labels:      item.Labels,
-			Body:        item.Body,
-			FieldValues: item.FieldValues,
-		}
-
-		val := item.FieldValues[fieldName]
-		if val == "" {
-			val = noGroup
-		}
-		card.Status = val
-
-		if _, ok := buckets[val]; ok {
-			buckets[val] = append(buckets[val], card)
-		} else {
-			buckets[noGroup] = append(buckets[noGroup], card)
-		}
-	}
-
-	columns := make([]Column, 0, len(options))
-	for _, opt := range options {
-		columns = append(columns, Column{Name: opt, Cards: buckets[opt]})
-	}
-	// Append the no-group bucket only if it has cards.
-	if cards := buckets[noGroup]; len(cards) > 0 {
-		// Avoid duplicate if noGroup was already an option.
-		found := false
-		for _, opt := range options {
-			if opt == noGroup {
-				found = true
-				break
-			}
-		}
-		if !found {
-			columns = append(columns, Column{Name: noGroup, Cards: cards})
-		}
-	}
-	return columns
-}
 
 // Client wraps the go-gh GraphQL client.
 type Client struct {
@@ -204,7 +39,7 @@ func (c *Client) ViewerLogin() (string, error) {
 }
 
 // ListUserProjects fetches up to 50 open projects for the given user login.
-func (c *Client) ListUserProjects(login string) ([]Project, error) {
+func (c *Client) ListUserProjects(login string) ([]core.Project, error) {
 	var q struct {
 		User struct {
 			ProjectsV2 struct {
@@ -226,12 +61,12 @@ func (c *Client) ListUserProjects(login string) ([]Project, error) {
 	if err := c.gql.Query("ListUserProjects", &q, variables); err != nil {
 		return nil, err
 	}
-	var projects []Project
+	var projects []core.Project
 	for _, n := range q.User.ProjectsV2.Nodes {
 		if n.Closed {
 			continue
 		}
-		projects = append(projects, Project{
+		projects = append(projects, core.Project{
 			ID:          n.ID,
 			Number:      n.Number,
 			Title:       n.Title,
@@ -245,7 +80,7 @@ func (c *Client) ListUserProjects(login string) ([]Project, error) {
 }
 
 // ListOrgProjects fetches up to 50 open projects for the given org login.
-func (c *Client) ListOrgProjects(org string) ([]Project, error) {
+func (c *Client) ListOrgProjects(org string) ([]core.Project, error) {
 	var q struct {
 		Organization struct {
 			ProjectsV2 struct {
@@ -267,12 +102,12 @@ func (c *Client) ListOrgProjects(org string) ([]Project, error) {
 	if err := c.gql.Query("ListOrgProjects", &q, variables); err != nil {
 		return nil, err
 	}
-	var projects []Project
+	var projects []core.Project
 	for _, n := range q.Organization.ProjectsV2.Nodes {
 		if n.Closed {
 			continue
 		}
-		projects = append(projects, Project{
+		projects = append(projects, core.Project{
 			ID:          n.ID,
 			Number:      n.Number,
 			Title:       n.Title,
@@ -283,31 +118,6 @@ func (c *Client) ListOrgProjects(org string) ([]Project, error) {
 		})
 	}
 	return projects, nil
-}
-
-// FlatItems returns all non-archived items in API order, for table views.
-func FlatItems(data *BoardData) []Card {
-	var cards []Card
-	for _, item := range data.Items {
-		if item.IsArchived {
-			continue
-		}
-		cards = append(cards, Card{
-			ID:          item.ID,
-			Type:        item.Type,
-			Number:      item.Number,
-			Title:       item.Title,
-			State:       item.State,
-			URL:         item.URL,
-			Repo:        item.Repo,
-			Assignees:   item.Assignees,
-			Labels:      item.Labels,
-			Body:        item.Body,
-			Status:      item.FieldValues["Status"],
-			FieldValues: item.FieldValues,
-		})
-	}
-	return cards
 }
 
 // ListViewerOrgs returns the login names of orgs the authenticated user belongs to.
@@ -330,16 +140,16 @@ func (c *Client) ListViewerOrgs() ([]string, error) {
 }
 
 // GetProjectBoard fetches views, fields, and all items for a project.
-// Use GroupByField to render a specific view's columns.
-func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
+// Use core.GroupByField to render a specific view's columns.
+func (c *Client) GetProjectBoard(projectID string) (*core.BoardData, error) {
 	var q struct {
 		Node struct {
 			Project struct {
 				Views struct {
 					Nodes []struct {
-						ID     string
-						Name   string
-						Layout string
+						ID            string
+						Name          string
+						Layout        string
 						GroupByFields struct {
 							Nodes []struct {
 								AsSelectField struct {
@@ -480,23 +290,23 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 	}
 
 	// Build SelectFields map.
-	var fields []SelectField
+	var fields []core.SelectField
 	for _, f := range q.Node.Project.Fields.Nodes {
 		sf := f.AsSelectField
 		if sf.Name == "" {
 			continue
 		}
-		field := SelectField{ID: sf.ID, Name: sf.Name}
+		field := core.SelectField{ID: sf.ID, Name: sf.Name}
 		for _, opt := range sf.Options {
-			field.Options = append(field.Options, FieldOption{Name: opt.Name, Color: opt.Color})
+			field.Options = append(field.Options, core.FieldOption{Name: opt.Name, Color: opt.Color})
 		}
 		fields = append(fields, field)
 	}
 
 	// Build views, resolving groupByField name and visible fields.
-	var views []ProjectView
+	var views []core.ProjectView
 	for _, v := range q.Node.Project.Views.Nodes {
-		pv := ProjectView{
+		pv := core.ProjectView{
 			ID:     v.ID,
 			Name:   v.Name,
 			Layout: v.Layout,
@@ -511,7 +321,7 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 		// Parse visible fields for this view.
 		for _, vf := range v.VisibleFields.Nodes {
 			if vf.Name != "" {
-				pv.VisibleFields = append(pv.VisibleFields, VisibleField{ID: vf.ID, Name: vf.Name, DataType: vf.DataType})
+				pv.VisibleFields = append(pv.VisibleFields, core.VisibleField{ID: vf.ID, Name: vf.Name, DataType: vf.DataType})
 			}
 		}
 		views = append(views, pv)
@@ -519,13 +329,13 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 
 	// If no views returned, synthesise a default "Board" view grouped by Status.
 	if len(views) == 0 {
-		views = []ProjectView{{Name: "Board", Layout: "BOARD_LAYOUT", GroupByField: "Status"}}
+		views = []core.ProjectView{{Name: "Board", Layout: "BOARD_LAYOUT", GroupByField: "Status"}}
 	}
 
 	// Build raw items.
-	var items []RawItem
+	var items []core.RawItem
 	for _, item := range q.Node.Project.Items.Nodes {
-		ri := RawItem{
+		ri := core.RawItem{
 			ID:          item.ID,
 			Type:        item.Type,
 			IsArchived:  item.IsArchived,
@@ -579,50 +389,12 @@ func (c *Client) GetProjectBoard(projectID string) (*BoardData, error) {
 				}
 			} else if len(fv.LabelValue.Labels.Nodes) > 0 {
 				for _, l := range fv.LabelValue.Labels.Nodes {
-					ri.Labels = append(ri.Labels, Label{Name: l.Name, Color: l.Color})
+					ri.Labels = append(ri.Labels, core.Label{Name: l.Name, Color: l.Color})
 				}
 			}
 		}
 		items = append(items, ri)
 	}
 
-	return &BoardData{Views: views, Fields: fields, Items: items}, nil
-}
-
-// OptionColors builds a lookup map of fieldName → optionName → terminal color string
-// derived from each option's GitHub color enum. Used by the board renderer.
-func OptionColors(data *BoardData) map[string]map[string]string {
-	result := make(map[string]map[string]string, len(data.Fields))
-	for _, f := range data.Fields {
-		m := make(map[string]string, len(f.Options))
-		for _, opt := range f.Options {
-			m[opt.Name] = githubColorToTerminal(opt.Color)
-		}
-		result[f.Name] = m
-	}
-	return result
-}
-
-// githubColorToTerminal maps a GitHub single-select color enum to a 256-color terminal code.
-func githubColorToTerminal(color string) string {
-	switch strings.ToUpper(color) {
-	case "GRAY":
-		return "241"
-	case "BLUE":
-		return "39"
-	case "GREEN":
-		return "76"
-	case "YELLOW":
-		return "227"
-	case "ORANGE":
-		return "214"
-	case "RED":
-		return "196"
-	case "PINK":
-		return "212"
-	case "PURPLE":
-		return "99"
-	default:
-		return "241"
-	}
+	return &core.BoardData{Views: views, Fields: fields, Items: items}, nil
 }
