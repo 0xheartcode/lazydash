@@ -298,7 +298,7 @@ func (c *Client) GetProjectBoard(projectID string) (*core.BoardData, error) {
 		}
 		field := core.SelectField{ID: sf.ID, Name: sf.Name}
 		for _, opt := range sf.Options {
-			field.Options = append(field.Options, core.FieldOption{Name: opt.Name, Color: opt.Color})
+			field.Options = append(field.Options, core.FieldOption{ID: opt.ID, Name: opt.Name, Color: opt.Color})
 		}
 		fields = append(fields, field)
 	}

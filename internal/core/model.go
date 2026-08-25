@@ -62,6 +62,7 @@ type ProjectView struct {
 
 // FieldOption is one option of a single-select field, including its color enum.
 type FieldOption struct {
+	ID    string // option node id, needed to set the field value via the API
 	Name  string
 	Color string // enum: GRAY | BLUE | GREEN | YELLOW | ORANGE | RED | PINK | PURPLE
 }

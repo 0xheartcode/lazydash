@@ -89,10 +89,6 @@ func (s *Source) CreateIssue(string, source.Draft) (core.Card, error) {
 	return core.Card{}, fmt.Errorf("creating GitHub issues is not supported yet")
 }
 
-func (s *Source) SetField(core.Card, string, string) error {
-	return fmt.Errorf("moving GitHub cards is not supported yet")
-}
-
 func (s *Source) SetLabels(core.Card, []string) error {
 	return fmt.Errorf("editing GitHub labels is not supported yet")
 }
