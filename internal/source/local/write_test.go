@@ -86,6 +86,34 @@ func TestSetFieldPriorityAndReopen(t *testing.T) {
 	}
 }
 
+func TestUndoPopsLastEvent(t *testing.T) {
+	dir, _ := newRepo(t)
+	s := &Source{root: dir, name: "x"}
+
+	card, err := s.CreateIssue("", source.Draft{Title: "Undo me"})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if err := s.Comment(card, "a note"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	if issues, _ := ListIssues(dir); len(issues[0].Comments) != 1 {
+		t.Fatalf("precondition: want 1 comment, got %d", len(issues[0].Comments))
+	}
+
+	if err := s.Undo(card); err != nil {
+		t.Fatalf("Undo: %v", err)
+	}
+	if issues, _ := ListIssues(dir); len(issues[0].Comments) != 0 {
+		t.Errorf("comment should be undone, got %d", len(issues[0].Comments))
+	}
+
+	// Only the create commit remains; it has no parent and cannot be undone.
+	if err := s.Undo(card); err == nil {
+		t.Error("undo of a create-only issue should error")
+	}
+}
+
 func TestAppendEventUnknownIssue(t *testing.T) {
 	dir, _ := newRepo(t)
 	s := &Source{root: dir, name: "x"}

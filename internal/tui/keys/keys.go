@@ -25,6 +25,7 @@ type Bindings struct {
 	Move        string
 	Labels      string
 	Assign      string
+	Undo        string
 }
 
 // FromConfig builds Bindings from config, filling in hard-coded navigation keys.
@@ -50,5 +51,6 @@ func FromConfig(cfg *config.Config) Bindings {
 		Move:          cfg.Keybindings.Move,
 		Labels:        cfg.Keybindings.Labels,
 		Assign:        cfg.Keybindings.Assign,
+		Undo:          cfg.Keybindings.Undo,
 	}
 }
