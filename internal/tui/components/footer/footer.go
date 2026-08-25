@@ -19,19 +19,28 @@ const (
 )
 
 type Model struct {
-	keys       keys.Bindings
-	width      int
-	pane       Pane
+	keys        keys.Bindings
+	width       int
+	pane        Pane
 	boardLayout string // "TABLE_LAYOUT" or "BOARD_LAYOUT"
-	status     string
+	status      string
+	source      string // active source name, shown on the board pane
+	offline     bool   // whether the active source works offline
 }
 
 func New(k keys.Bindings) Model { return Model{keys: k} }
 
-func (m *Model) SetWidth(w int)            { m.width = w }
-func (m *Model) SetPane(p Pane)            { m.pane = p }
-func (m *Model) SetBoardLayout(l string)   { m.boardLayout = l }
-func (m *Model) SetStatus(s string)        { m.status = s }
+func (m *Model) SetWidth(w int)          { m.width = w }
+func (m *Model) SetPane(p Pane)          { m.pane = p }
+func (m *Model) SetBoardLayout(l string) { m.boardLayout = l }
+func (m *Model) SetStatus(s string)      { m.status = s }
+
+// SetSource records which backend the loaded board came from and whether it is
+// an offline source, so the board pane can label it.
+func (m *Model) SetSource(name string, offline bool) {
+	m.source = name
+	m.offline = offline
+}
 
 func (m Model) View() string {
 	left := m.hintBar()
@@ -70,12 +79,12 @@ func (m Model) hintBar() string {
 			hint("tab", "→ board"),
 		}
 	case PaneBoard:
-		paneLabel = theme.Title.Render("BOARD")
+		paneLabel = theme.Title.Render("BOARD") + m.sourceTag()
 		if m.boardLayout == "TABLE_LAYOUT" {
 			paneHints = []string{
 				hint("j/k", "move"),
+				hint("enter", "details"),
 				hint(m.keys.OpenInBrowser, "browser"),
-				hint(m.keys.OpenInGhDash, "gh-dash"),
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
@@ -83,8 +92,8 @@ func (m Model) hintBar() string {
 			paneHints = []string{
 				hint("j/k", "item"),
 				hint("h/l", "column"),
+				hint("enter", "details"),
 				hint(m.keys.OpenInBrowser, "browser"),
-				hint(m.keys.OpenInGhDash, "gh-dash"),
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
@@ -93,4 +102,17 @@ func (m Model) hintBar() string {
 
 	all := append(paneHints, common...)
 	return paneLabel + "  " + strings.Join(all, "  ")
+}
+
+// sourceTag renders the active source next to the BOARD label, with an offline
+// marker for backends that need no network.
+func (m Model) sourceTag() string {
+	if m.source == "" {
+		return ""
+	}
+	tag := " " + theme.Muted.Render("· "+m.source)
+	if m.offline {
+		tag += " " + lipgloss.NewStyle().Foreground(theme.ColorSuccess).Render("offline")
+	}
+	return tag
 }

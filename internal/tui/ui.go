@@ -13,6 +13,7 @@ import (
 	"github.com/0xheartcode/lazydash/internal/tui/components/board"
 	"github.com/0xheartcode/lazydash/internal/tui/components/footer"
 	"github.com/0xheartcode/lazydash/internal/tui/components/projectlist"
+	"github.com/0xheartcode/lazydash/internal/tui/components/sidebar"
 	"github.com/0xheartcode/lazydash/internal/tui/keys"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/0xheartcode/lazydash/internal/utils"
@@ -56,12 +57,14 @@ type Model struct {
 
 	projects projectlist.Model
 	board    board.Model
+	sidebar  sidebar.Model
 	footer   footer.Model
 
 	boardData *core.BoardData
 	viewIdx   int
 
-	showHelp bool
+	showHelp    bool
+	showDetails bool
 }
 
 func (m *Model) setStatus(s string) {
@@ -83,6 +86,7 @@ func newModel(cfg *config.Config) Model {
 		active:   paneProjects,
 		projects: projectlist.New(),
 		board:    board.New(),
+		sidebar:  sidebar.New(),
 		footer:   footer.New(k),
 	}
 }
@@ -205,6 +209,20 @@ func (m *Model) layout() {
 	m.projects.SetSize(projectW, contentH)
 	m.board.SetSize(contentW, contentH)
 	m.footer.SetWidth(m.width)
+
+	// The detail overlay is a centered panel sized from the viewport.
+	sideW := m.width * 55 / 100
+	if sideW < 30 {
+		sideW = 30
+	}
+	if sideW > m.width-4 {
+		sideW = m.width - 4
+	}
+	sideH := m.height - 4
+	if sideH < 4 {
+		sideH = 4
+	}
+	m.sidebar.SetSize(sideW, sideH)
 }
 
 func (m *Model) syncActivePane() {
@@ -221,6 +239,21 @@ func (m *Model) syncActivePane() {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+
+	// The detail overlay captures keys while open: scroll, or dismiss.
+	if m.showDetails {
+		switch k {
+		case m.keys.Quit:
+			return m, tea.Quit
+		case "esc", m.keys.Enter:
+			m.showDetails = false
+		case m.keys.Up:
+			m.sidebar.ScrollUp()
+		case m.keys.Down:
+			m.sidebar.ScrollDown()
+		}
+		return m, nil
+	}
 
 	switch k {
 	case m.keys.Quit:
@@ -264,6 +297,11 @@ func (m Model) handleProjectsKey(k string) (tea.Model, tea.Cmd) {
 		if p := m.projects.Selected(); p != nil {
 			m.loading = true
 			m.setStatus(fmt.Sprintf("Loading %s…", p.Title))
+			offline := false
+			if s := m.registry.ByName(p.Source); s != nil {
+				offline = s.Caps().Offline
+			}
+			m.footer.SetSource(p.Source, offline)
 			return m, tea.Batch(m.spinner.Tick, fetchBoardCmd(*p, m.registry))
 		}
 	}
@@ -287,6 +325,12 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 	case m.keys.NextView:
 		if m.boardData != nil && m.viewIdx < len(m.boardData.Views)-1 {
 			m.applyView(m.viewIdx + 1)
+		}
+	case m.keys.Enter:
+		if card := m.board.SelectedCard(); card != nil {
+			m.sidebar.SetCard(card)
+			m.sidebar.SetActive(true)
+			m.showDetails = true
 		}
 	case m.keys.OpenInBrowser:
 		m.openURL(m.board.SelectedCard())
@@ -331,6 +375,9 @@ func (m Model) View() string {
 	if m.showHelp {
 		return m.helpView()
 	}
+	if m.showDetails {
+		return m.detailsView()
+	}
 
 	var body string
 	if m.loading {
@@ -349,6 +396,11 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.footer.View())
 }
 
+// detailsView renders the selected card's detail panel as a centered overlay.
+func (m Model) detailsView() string {
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.sidebar.View())
+}
+
 func (m Model) helpView() string {
 	rows := []string{
 		theme.Title.Render("lazydash — keyboard reference"),
@@ -358,7 +410,8 @@ func (m Model) helpView() string {
 		theme.HelpKey.Render("  j / k          ") + "  " + theme.HelpDesc.Render("move up / down"),
 		theme.HelpKey.Render("  h / l          ") + "  " + theme.HelpDesc.Render("move left / right (board columns only)"),
 		theme.HelpKey.Render("  [ / ]          ") + "  " + theme.HelpDesc.Render("switch project views"),
-		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("load selected project"),
+		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("load project · open card details"),
+		theme.HelpKey.Render("  esc            ") + "  " + theme.HelpDesc.Render("close details / overlay"),
 		"",
 		theme.HelpKey.Render("Actions"),
 		theme.HelpKey.Render("  "+m.keys.OpenInBrowser+"               ") + "  " + theme.HelpDesc.Render("open in browser"),

@@ -109,6 +109,14 @@ func (m Model) buildContent(width int) string {
 		lines = append(lines, label("State", stateStyle.Render(strings.ToLower(c.State))))
 	}
 
+	// Notable field values — the local backend's Priority/Milestone trailers and
+	// GitHub custom single-select fields both land in FieldValues.
+	for _, k := range []string{"Priority", "Milestone", "Iteration"} {
+		if v := c.FieldValues[k]; v != "" {
+			lines = append(lines, label(k, v))
+		}
+	}
+
 	if len(c.Assignees) > 0 {
 		lines = append(lines, label("Assigned", strings.Join(c.Assignees, ", ")))
 	}
