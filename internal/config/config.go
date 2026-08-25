@@ -33,6 +33,12 @@ type Keybindings struct {
 	Quit          string `yaml:"quit"`
 	PrevView      string `yaml:"prevView"`
 	NextView      string `yaml:"nextView"`
+	Create        string `yaml:"create"`
+	Comment       string `yaml:"comment"`
+	ToggleState   string `yaml:"toggleState"`
+	Move          string `yaml:"move"`
+	Labels        string `yaml:"labels"`
+	Assign        string `yaml:"assign"`
 }
 
 func defaults() Config {
@@ -49,6 +55,12 @@ func defaults() Config {
 			Quit:          "q",
 			PrevView:      "[",
 			NextView:      "]",
+			Create:        "c",
+			Comment:       "m",
+			ToggleState:   "x",
+			Move:          "M",
+			Labels:        "L",
+			Assign:        "a",
 		},
 	}
 }
@@ -78,29 +90,27 @@ func Load(flagPath string) (*Config, error) {
 		return nil, err
 	}
 
-	// Restore defaults for unset keybindings
-	d := defaults()
-	if cfg.Keybindings.OpenInBrowser == "" {
-		cfg.Keybindings.OpenInBrowser = d.Keybindings.OpenInBrowser
+	// Restore defaults for any keybinding left unset in the config file.
+	d := defaults().Keybindings
+	kb := &cfg.Keybindings
+	fill := func(dst *string, def string) {
+		if *dst == "" {
+			*dst = def
+		}
 	}
-	if cfg.Keybindings.OpenInGhDash == "" {
-		cfg.Keybindings.OpenInGhDash = d.Keybindings.OpenInGhDash
-	}
-	if cfg.Keybindings.Refresh == "" {
-		cfg.Keybindings.Refresh = d.Keybindings.Refresh
-	}
-	if cfg.Keybindings.Help == "" {
-		cfg.Keybindings.Help = d.Keybindings.Help
-	}
-	if cfg.Keybindings.Quit == "" {
-		cfg.Keybindings.Quit = d.Keybindings.Quit
-	}
-	if cfg.Keybindings.PrevView == "" {
-		cfg.Keybindings.PrevView = d.Keybindings.PrevView
-	}
-	if cfg.Keybindings.NextView == "" {
-		cfg.Keybindings.NextView = d.Keybindings.NextView
-	}
+	fill(&kb.OpenInBrowser, d.OpenInBrowser)
+	fill(&kb.OpenInGhDash, d.OpenInGhDash)
+	fill(&kb.Refresh, d.Refresh)
+	fill(&kb.Help, d.Help)
+	fill(&kb.Quit, d.Quit)
+	fill(&kb.PrevView, d.PrevView)
+	fill(&kb.NextView, d.NextView)
+	fill(&kb.Create, d.Create)
+	fill(&kb.Comment, d.Comment)
+	fill(&kb.ToggleState, d.ToggleState)
+	fill(&kb.Move, d.Move)
+	fill(&kb.Labels, d.Labels)
+	fill(&kb.Assign, d.Assign)
 	return &cfg, nil
 }
 

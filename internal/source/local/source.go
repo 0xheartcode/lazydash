@@ -37,10 +37,19 @@ func New(dir string) (*Source, error) {
 // Name identifies this backend.
 func (s *Source) Name() string { return "local" }
 
-// Caps reports that the backend works offline. Reads are always available;
-// write flags are turned on in a later commit, gated on the git issue binary.
+// Caps reports the backend's capabilities. It works fully offline and supports
+// the whole mutation surface, since writes are authored with git plumbing and
+// need no external binary.
 func (s *Source) Caps() source.Capabilities {
-	return source.Capabilities{Offline: true}
+	return source.Capabilities{
+		Offline:  true,
+		Create:   true,
+		Comment:  true,
+		SetState: true,
+		SetField: true,
+		Labels:   true,
+		Assign:   true,
+	}
 }
 
 // ListProjects exposes the repository as a single synthetic project.

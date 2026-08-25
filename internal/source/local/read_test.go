@@ -40,11 +40,14 @@ func commitTree(t *testing.T, dir, tree, parent, msg, date string) string {
 	return runGit(t, dir, env, msg, args...)
 }
 
-// newRepo initialises a throwaway repo and returns its dir plus the empty-tree hash.
+// newRepo initialises a throwaway repo with a committer identity and returns its
+// dir plus the empty-tree hash.
 func newRepo(t *testing.T) (dir, tree string) {
 	t.Helper()
 	dir = t.TempDir()
 	runGit(t, dir, nil, "", "init", "-q")
+	runGit(t, dir, nil, "", "config", "user.email", "tester@example.com")
+	runGit(t, dir, nil, "", "config", "user.name", "Tester")
 	tree = runGit(t, dir, nil, "", "mktree") // empty input -> empty tree object
 	return dir, tree
 }

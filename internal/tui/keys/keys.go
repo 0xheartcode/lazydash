@@ -18,6 +18,13 @@ type Bindings struct {
 	Enter         string
 	PrevView      string
 	NextView      string
+	// Write actions (gated on the active source's capabilities).
+	Create      string
+	Comment     string
+	ToggleState string
+	Move        string
+	Labels      string
+	Assign      string
 }
 
 // FromConfig builds Bindings from config, filling in hard-coded navigation keys.
@@ -37,5 +44,11 @@ func FromConfig(cfg *config.Config) Bindings {
 		Quit:          cfg.Keybindings.Quit,
 		PrevView:      cfg.Keybindings.PrevView,
 		NextView:      cfg.Keybindings.NextView,
+		Create:        cfg.Keybindings.Create,
+		Comment:       cfg.Keybindings.Comment,
+		ToggleState:   cfg.Keybindings.ToggleState,
+		Move:          cfg.Keybindings.Move,
+		Labels:        cfg.Keybindings.Labels,
+		Assign:        cfg.Keybindings.Assign,
 	}
 }

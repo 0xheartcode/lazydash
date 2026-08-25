@@ -26,6 +26,7 @@ type Model struct {
 	status      string
 	source      string // active source name, shown on the board pane
 	offline     bool   // whether the active source works offline
+	canWrite    bool   // whether the active source supports mutations
 }
 
 func New(k keys.Bindings) Model { return Model{keys: k} }
@@ -35,11 +36,13 @@ func (m *Model) SetPane(p Pane)          { m.pane = p }
 func (m *Model) SetBoardLayout(l string) { m.boardLayout = l }
 func (m *Model) SetStatus(s string)      { m.status = s }
 
-// SetSource records which backend the loaded board came from and whether it is
-// an offline source, so the board pane can label it.
-func (m *Model) SetSource(name string, offline bool) {
+// SetSource records which backend the loaded board came from, whether it is an
+// offline source, and whether it supports writes, so the board pane can label it
+// and show the write hints only when they apply.
+func (m *Model) SetSource(name string, offline, canWrite bool) {
 	m.source = name
 	m.offline = offline
+	m.canWrite = canWrite
 }
 
 func (m Model) View() string {
@@ -97,6 +100,14 @@ func (m Model) hintBar() string {
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
+		}
+		if m.canWrite {
+			write := []string{
+				hint(m.keys.Create, "new"),
+				hint(m.keys.Comment, "comment"),
+				hint(m.keys.ToggleState, "close"),
+			}
+			paneHints = append(write, paneHints...)
 		}
 	}
 
