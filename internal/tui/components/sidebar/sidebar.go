@@ -56,8 +56,8 @@ func (m *Model) SetCard(card *core.Card) {
 
 func (m *Model) SetActive(a bool) { m.active = a }
 
-func (m *Model) ScrollUp()   { m.viewport.LineUp(1) }
-func (m *Model) ScrollDown() { m.viewport.LineDown(1) }
+func (m *Model) ScrollUp()   { m.viewport.ScrollUp(1) }
+func (m *Model) ScrollDown() { m.viewport.ScrollDown(1) }
 
 func (m Model) View() string {
 	border := theme.InactiveBorder

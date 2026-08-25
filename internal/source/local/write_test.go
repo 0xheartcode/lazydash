@@ -114,6 +114,48 @@ func TestUndoPopsLastEvent(t *testing.T) {
 	}
 }
 
+func TestSetLabelsAndAssignee(t *testing.T) {
+	dir, _ := newRepo(t)
+	s := &Source{root: dir, name: "x"}
+	card, err := s.CreateIssue("", source.Draft{Title: "T"})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if err := s.SetLabels(card, []string{"bug", "ui"}); err != nil {
+		t.Fatalf("SetLabels: %v", err)
+	}
+	if err := s.SetAssignees(card, []string{"alice@example.com"}); err != nil {
+		t.Fatalf("SetAssignees: %v", err)
+	}
+	issues, _ := ListIssues(dir)
+	got := issues[0]
+	if strings.Join(got.Labels, ",") != "bug,ui" {
+		t.Errorf("Labels = %v, want [bug ui]", got.Labels)
+	}
+	if got.Assignee != "alice@example.com" {
+		t.Errorf("Assignee = %q", got.Assignee)
+	}
+}
+
+func TestCanonicalTrailerKey(t *testing.T) {
+	cases := map[string]string{
+		"priority":  "Priority",
+		"labels":    "Labels",
+		"label":     "Labels",
+		"assignee":  "Assignee",
+		"assignees": "Assignee",
+		"milestone": "Milestone",
+		"state":     "State",
+		"custom":    "Custom", // unknown keys are title-cased
+		"":          "",
+	}
+	for in, want := range cases {
+		if got := canonicalTrailerKey(in); got != want {
+			t.Errorf("canonicalTrailerKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestAppendEventUnknownIssue(t *testing.T) {
 	dir, _ := newRepo(t)
 	s := &Source{root: dir, name: "x"}
