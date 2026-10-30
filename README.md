@@ -1,6 +1,8 @@
 # lazydash
 
-Humble keyboard-driven terminal UI for your issues — GitHub Projects **and** local git-native issues.
+![CI](https://github.com/0xheartcode/lazydash/actions/workflows/ci.yml/badge.svg)
+
+Humble keyboard-driven terminal UI for your issues: GitHub Projects **and** local git-native issues.
 ##### A browser (and editor) for your projects, in your terminal.
 
 ![demo](https://github.com/user-attachments/assets/0a1698ac-8a09-4426-a1f9-47f877aeffd2)
@@ -14,7 +16,7 @@ Use lazydash.
 Your code travels with `git clone`; your GitHub issues don't. lazydash speaks to
 both worlds from one keyboard-driven UI: your **GitHub Projects** boards, and
 **local git-native issues** that live in the repo itself and work with no network
-at all. Same board, same table, same keys — online or offline.
+at all. Same board, same table, same keys, online or offline.
 
 Also thinking of renaming it lazyview, since with alias lazydash = ld, which may already be taken by lazydocker.
 
@@ -38,9 +40,22 @@ config key.
 
 ## Install
 
-For GitHub, [gh CLI](https://cli.github.com/) authenticated (`gh auth login`) —
+For GitHub, [gh CLI](https://cli.github.com/) authenticated (`gh auth login`),
 also used to write (comment / close / move). For local issues you only need
 `git`; nothing else, no network.
+
+The easiest path is a prebuilt release binary. Install it with the one-line
+script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0xheartcode/lazydash/main/scripts/install.sh | sh
+```
+
+Or download a prebuilt archive from the
+[releases page](https://github.com/0xheartcode/lazydash/releases) and put the
+`lazydash` binary on your PATH.
+
+Or install with `go`:
 
 ```bash
 go install github.com/0xheartcode/lazydash@latest
@@ -65,6 +80,7 @@ go build -o lazydash .
 ```bash
 lazydash                                    # browse GitHub Projects + this repo's local issues
 lazydash --config ~/.config/lazydash/config.yml
+lazydash version                            # print the version
 ```
 
 Run it **inside a repository** to work with that repo's local issues offline. The
@@ -81,9 +97,10 @@ and needs no extra tooling.
 | `tab` / `shift+tab` | Next / previous pane |
 | `enter` | Load project · open card details |
 | `esc` | Close details / cancel a modal |
-| `[` / `]` | Cycle project views (Board → Table → Roadmap) |
+| `[` / `]` | Cycle project views (Board / Table) |
 | `o` | Open in browser |
 | `d` | Open in gh-dash |
+| `p` | Open the full issue in a pager (bat, else $PAGER, else less) |
 | `r` | Refresh |
 | `?` | Help |
 | `q` | Quit |
@@ -102,16 +119,21 @@ Write actions (shown only for writable sources, gated per backend capability):
 ## Features
 
 - **Two backends, one UI.** Browse and edit GitHub Projects and local git-native
-  issues from the same board/table/roadmap views, switchable with `[` / `]`.
+  issues from the same board and table views, switchable with `[` / `]`.
+- **Styled Markdown detail panel.** Issue descriptions and bodies render as
+  styled Markdown in the detail panel, and `p` opens the full issue in an
+  external pager (bat, else `$PAGER`, else less).
 - **Fully offline for local issues.** Create, comment, close, move, label, assign
-  and undo — all authored as git commits under `refs/issues/`, no network, no
+  and undo, all authored as git commits under `refs/issues/`, no network, no
   external binary.
 - **Manage GitHub too.** Comment, close/reopen and move cards between columns via
   the authenticated `gh` CLI.
 - **Offline cache.** The last synced GitHub board is cached, so it stays
   browsable (read-only) when you're offline.
-- **Live GitHub views.** GitHub boards/tables/roadmaps are fetched live from the
+- **Live GitHub views.** GitHub boards and tables are fetched live from the
   Projects API, so the TUI matches the browser.
+- **Planned: timeline/roadmap view.** A roadmap view is planned for a later
+  release.
 
 ## Config
 

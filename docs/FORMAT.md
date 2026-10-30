@@ -1,93 +1,41 @@
 # Git-native issue format
 
-lazydash's local backend stores issues directly in the git repository, with no
-database and no network. This document specifies the on-disk format so other
-tools can read and write the same issues. The format is versioned; issues
-created by lazydash carry `Format-Version: 1`.
+lazydash's local backend reads and writes issues stored directly in the Git
+repository, with no database and no network. The format is **owned and specified
+by git-local-issue (`gli`)**, which is the reference implementation:
 
-## Storage model
+- Specification: https://github.com/0xheartcode/git-local-issue/blob/main/FORMAT.md
+- `gli` on crates.io / GitHub: https://github.com/0xheartcode/git-local-issue
 
-Each issue is an append-only chain of commits under its own ref:
+lazydash conforms to that spec rather than defining its own; this document is a
+short orientation, and the `gli` spec is authoritative wherever they differ.
 
-```
-refs/issues/<uuid>
-```
+## Storage model (overview)
 
-`<uuid>` is a random RFC 4122 version-4 UUID. The ref points at the tip of the
-chain. Every commit in the chain is one event:
+- Each issue is one ref: `refs/issues/<uuid>`.
+- The issue is an append-only chain of commits; each commit is one immutable
+  operation (create, comment, set-state, add-label, add-assignee, and so on).
+  The root commit is the `create` operation.
+- Commits normally point at the empty tree: the issue's data lives in the commit
+  message, not in files.
+- The current state of an issue is not stored. It is computed by folding the
+  operation log with the CRDT rules in the `gli` spec (last-writer-wins registers
+  for single values like title and state, observed-remove sets for labels and
+  assignees), ordered by each operation's logical `(Lamport, Op-Id)`.
 
-- The **root commit** (no parent) creates the issue.
-- Each **later commit** records a mutation (a comment, a state change, a field
-  change) and has the previous tip as its single parent.
+Because reads depend only on Git, viewing issues never requires any external
+binary and works fully offline.
 
-Commits carry no file content: every commit points at the repository's empty
-tree (`git mktree </dev/null`). All issue data lives in the commit message. This
-keeps the object store small and makes an issue's history a plain `git log`.
+## Reading and writing
 
-Writes update the ref with a compare-and-swap (`git update-ref <ref> <new> <old>`)
-so a concurrent write is rejected rather than silently lost.
+- **Reading:** lazydash folds the operation log directly from Git.
+- **Writing:** lazydash delegates writes to the `gli` binary when it is
+  installed, so `gli` remains the single owner of operation encoding (operation
+  ids, logical clocks, set semantics). Write actions are advertised only when
+  `gli` is available, the same way GitHub write actions require the `gh` CLI.
 
-## Commit message format
+## Compatibility
 
-A commit message is a subject line, an optional body, and a trailing block of
-`Key: value` trailers:
-
-```
-<subject>
-
-<optional body, one or more paragraphs>
-
-State: open
-Priority: P1
-Labels: bug, ui
-Assignee: alice
-Format-Version: 1
-```
-
-Parsing rules:
-
-- The first line is the subject. For the root commit it is the issue title.
-- The trailers are the trailing contiguous run of lines matching
-  `^[A-Za-z][A-Za-z0-9-]*:[ \t]*.*$`. Everything between the subject and that
-  block is the body (the issue description for the root commit).
-- A later commit whose subject is, for example, `Close issue` or `Update labels`
-  records an event; its trailers carry the new values.
-
-## Trailers
-
-Trailers are written in a stable order and read case-sensitively by key:
-
-| Key              | Meaning                                              |
-| ---------------- | ---------------------------------------------------- |
-| `State`          | `open` or `closed` (lower case)                      |
-| `Priority`       | free-form priority label (for example `P1`)          |
-| `Labels`         | comma-separated label names                          |
-| `Assignee`       | comma-separated assignee names                       |
-| `Milestone`      | milestone name                                       |
-| `Fixed-By`       | reference to a fixing commit or change               |
-| `Format-Version` | format version of the issue, currently `1`           |
-
-List values (`Labels`, `Assignee`) are comma-separated and trimmed; empty
-entries are dropped.
-
-## Reconstructing an issue
-
-Reading an issue means walking its chain from root to tip and folding the events:
-
-1. Start from the root commit's title, body, and trailers.
-2. Apply each later commit in order. A `State` trailer updates the open/closed
-   state; other trailers replace the corresponding field; a plain event with a
-   body is a comment.
-3. The latest value of each field wins.
-
-Because the chain is append-only, undo is a ref reset to the tip's parent
-(`git update-ref <ref> <parent> <tip>`); the popped commit stays in the object
-store and remains recoverable through the reflog. The root commit has no parent
-and so cannot be undone this way.
-
-## Interoperability
-
-Any tool that writes commits in this layout is readable by lazydash, and issues
-lazydash writes are readable by any tool that follows these rules. Reading
-depends only on git plumbing, so viewing issues never requires an external
-binary.
+Per the `gli` spec, readers ignore unknown trailers and never reject a higher
+`Format-Version`, so the format can grow additively. The current format version
+is `1`.
