@@ -32,7 +32,7 @@ cover:
 # Install the lint tool used by the gate (kept out of the module). Pinned for
 # reproducibility; needs a Go toolchain at least as new as the analyzed code.
 tools:
-	go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+	go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
 
 # The full deterministic gate, shared by local dev and CI.
 check: fmt vet staticcheck build cover
