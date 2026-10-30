@@ -28,6 +28,7 @@ type Defaults struct {
 type Keybindings struct {
 	OpenInBrowser string `yaml:"openInBrowser"`
 	OpenInGhDash  string `yaml:"openInGhDash"`
+	Pager         string `yaml:"pager"`
 	Refresh       string `yaml:"refresh"`
 	Help          string `yaml:"help"`
 	Quit          string `yaml:"quit"`
@@ -51,6 +52,7 @@ func defaults() Config {
 		Keybindings: Keybindings{
 			OpenInBrowser: "o",
 			OpenInGhDash:  "d",
+			Pager:         "p",
 			Refresh:       "r",
 			Help:          "?",
 			Quit:          "q",
@@ -102,6 +104,7 @@ func Load(flagPath string) (*Config, error) {
 	}
 	fill(&kb.OpenInBrowser, d.OpenInBrowser)
 	fill(&kb.OpenInGhDash, d.OpenInGhDash)
+	fill(&kb.Pager, d.Pager)
 	fill(&kb.Refresh, d.Refresh)
 	fill(&kb.Help, d.Help)
 	fill(&kb.Quit, d.Quit)

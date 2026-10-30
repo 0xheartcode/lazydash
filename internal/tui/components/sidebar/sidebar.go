@@ -7,6 +7,7 @@ import (
 	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -138,10 +139,34 @@ func (m Model) buildContent(width int) string {
 	if c.Body != "" {
 		lines = append(lines, "")
 		lines = append(lines, strings.Repeat("─", width))
-		lines = append(lines, wordWrap(c.Body, width))
+		lines = append(lines, renderMarkdown(c.Body, width))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// renderMarkdown renders an issue body as styled terminal markdown (headings,
+// lists, tables, and syntax-highlighted code fences). It falls back to a plain
+// word wrap if the renderer cannot be built or the body fails to render, so a
+// detail panel never goes blank on malformed input.
+func renderMarkdown(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return wordWrap(s, width)
+	}
+	out, err := r.Render(s)
+	if err != nil {
+		return wordWrap(s, width)
+	}
+	// glamour frames the document with blank lines; trim them so the body sits
+	// flush against the separator above it.
+	return strings.Trim(out, "\n")
 }
 
 func humanType(t string) string {

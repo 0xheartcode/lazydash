@@ -12,6 +12,7 @@ type Bindings struct {
 	PrevPane      string
 	OpenInBrowser string
 	OpenInGhDash  string
+	Pager         string
 	Refresh       string
 	Help          string
 	Quit          string
@@ -40,6 +41,7 @@ func FromConfig(cfg *config.Config) Bindings {
 		Enter:         "enter",
 		OpenInBrowser: cfg.Keybindings.OpenInBrowser,
 		OpenInGhDash:  cfg.Keybindings.OpenInGhDash,
+		Pager:         cfg.Keybindings.Pager,
 		Refresh:       cfg.Keybindings.Refresh,
 		Help:          cfg.Keybindings.Help,
 		Quit:          cfg.Keybindings.Quit,
