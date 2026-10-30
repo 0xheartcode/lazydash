@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
@@ -9,10 +10,23 @@ import (
 
 // --- View ---
 
+// Minimum usable terminal size. Below this the two-pane layout cannot render
+// without wrapping into an unreadable mess, so we show a prompt instead.
+const (
+	minWidth  = 60
+	minHeight = 18
+)
+
 func (m Model) View() string {
 	writeSnapshot(m) // optional test state seam; no-op unless --dump-state is set
 	if m.width == 0 {
 		return "Initializing…"
+	}
+	if m.width < minWidth || m.height < minHeight {
+		msg := fmt.Sprintf("Terminal too small.\n\nResize to at least %dx%d (currently %dx%d).",
+			minWidth, minHeight, m.width, m.height)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			theme.Muted.Render(msg))
 	}
 	if m.showHelp {
 		return m.helpView()
@@ -68,7 +82,7 @@ func (m Model) confirmView() string {
 
 func (m Model) helpView() string {
 	rows := []string{
-		theme.Title.Render("lazydash — keyboard reference"),
+		theme.Title.Render("lazydash keyboard reference"),
 		"",
 		theme.HelpKey.Render("Navigation"),
 		theme.HelpKey.Render("  tab / shift+tab") + "  " + theme.HelpDesc.Render("cycle panes (PROJECTS ↔ BOARD)"),

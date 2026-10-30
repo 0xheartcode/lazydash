@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/0xheartcode/lazydash/internal/config"
@@ -335,5 +336,23 @@ func TestModalModeTransitions(t *testing.T) {
 	}
 	if s["action"] != "close" {
 		t.Errorf("after toggle state, action = %v, want close", s["action"])
+	}
+}
+
+func TestViewTooSmallShowsPrompt(t *testing.T) {
+	m := newModel(testConfig(t))
+
+	// Below the minimum, the view shows a resize prompt instead of the layout.
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m = upd.(Model)
+	if out := m.View(); !strings.Contains(out, "Terminal too small") {
+		t.Errorf("small terminal: View() did not show the resize prompt, got:\n%s", out)
+	}
+
+	// A large enough terminal must not show the prompt.
+	upd, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = upd.(Model)
+	if out := m.View(); strings.Contains(out, "Terminal too small") {
+		t.Error("large terminal: View() should not show the resize prompt")
 	}
 }
