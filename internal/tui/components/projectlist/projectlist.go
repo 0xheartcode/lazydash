@@ -54,6 +54,9 @@ func (m Model) Selected() *core.Project {
 
 func (m Model) Cursor() int { return m.cursor }
 
+// Count returns the number of projects in the list.
+func (m Model) Count() int { return len(m.projects) }
+
 func (m Model) View() string {
 	border := theme.InactiveBorder
 	if m.active {

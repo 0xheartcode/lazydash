@@ -9,7 +9,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cfgPath string
+var (
+	cfgPath   string
+	dumpState string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "lazydash",
@@ -24,6 +27,9 @@ offline, or anywhere to browse and edit your GitHub Projects.`,
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
+		if dumpState != "" {
+			tui.SetSnapshotPath(dumpState)
+		}
 		return tui.Start(cfg)
 	},
 }
@@ -36,4 +42,5 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "path to config file")
+	rootCmd.PersistentFlags().StringVar(&dumpState, "dump-state", "", "write a JSON state snapshot here on each render (panekit test seam)")
 }

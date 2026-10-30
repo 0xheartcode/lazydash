@@ -113,6 +113,21 @@ func (m *Model) MoveRight() {
 	}
 }
 
+// Layout reports the current layout ("BOARD_LAYOUT" or "TABLE_LAYOUT").
+func (m Model) Layout() string { return m.layout }
+
+// Counts returns the number of columns and the total number of cards. In table
+// layout columns is 0 and cards is the row count.
+func (m Model) Counts() (columns, cards int) {
+	if m.layout == "TABLE_LAYOUT" {
+		return 0, len(m.tableItems)
+	}
+	for _, c := range m.columns {
+		cards += len(c.Cards)
+	}
+	return len(m.columns), cards
+}
+
 func (m Model) SelectedCard() *core.Card {
 	if m.layout == "TABLE_LAYOUT" {
 		if len(m.tableItems) == 0 || m.tableRow >= len(m.tableItems) {
