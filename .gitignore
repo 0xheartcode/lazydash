@@ -5,3 +5,9 @@ dist/
 vendor/
 .env
 .lazydash.yml
+
+# Local development tooling and its output, never published.
+/local/
+.claude/
+*.pds
+*.dumpstate.json

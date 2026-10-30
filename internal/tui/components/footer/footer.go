@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const version = "v0.2.0"
+const version = "v0.2.1"
 
 type Pane int
 
@@ -88,6 +88,7 @@ func (m Model) hintBar() string {
 				hint("j/k", "move"),
 				hint("enter", "details"),
 				hint(m.keys.OpenInBrowser, "browser"),
+				hint(m.keys.Pager, "pager"),
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
@@ -97,6 +98,7 @@ func (m Model) hintBar() string {
 				hint("h/l", "column"),
 				hint("enter", "details"),
 				hint(m.keys.OpenInBrowser, "browser"),
+				hint(m.keys.Pager, "pager"),
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
