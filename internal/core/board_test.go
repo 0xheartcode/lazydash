@@ -66,3 +66,61 @@ func TestColorToTerminalUnknownFallsBackToGray(t *testing.T) {
 		t.Errorf("red = %q, want 196", got)
 	}
 }
+
+// TestColorToTerminalAllCases asserts the exact terminal code for every switch
+// branch (including the default), plus case-insensitive handling of the input.
+func TestColorToTerminalAllCases(t *testing.T) {
+	cases := []struct {
+		name  string
+		color string
+		want  string
+	}{
+		{"gray", "GRAY", "241"},
+		{"blue", "BLUE", "39"},
+		{"green", "GREEN", "76"},
+		{"yellow", "YELLOW", "227"},
+		{"orange", "ORANGE", "214"},
+		{"red", "RED", "196"},
+		{"pink", "PINK", "212"},
+		{"purple", "PURPLE", "99"},
+		{"default unknown", "TEAL", "241"},
+		{"default empty", "", "241"},
+		{"lowercase blue", "blue", "39"},
+		{"mixed case green", "GrEeN", "76"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := colorToTerminal(tc.color); got != tc.want {
+				t.Errorf("colorToTerminal(%q) = %q, want %q", tc.color, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOptionColorsNestedMapAllColors verifies OptionColors builds the nested
+// fieldName to optionName to terminal code map across several color enums.
+func TestOptionColorsNestedMapAllColors(t *testing.T) {
+	data := &BoardData{
+		Fields: []SelectField{{
+			Name: "Priority",
+			Options: []FieldOption{
+				{Name: "Low", Color: "BLUE"},
+				{Name: "Medium", Color: "YELLOW"},
+				{Name: "High", Color: "RED"},
+				{Name: "Unset", Color: "WHATEVER"},
+			},
+		}},
+	}
+	colors := OptionColors(data)
+	want := map[string]string{
+		"Low":    "39",
+		"Medium": "227",
+		"High":   "196",
+		"Unset":  "241",
+	}
+	for opt, code := range want {
+		if got := colors["Priority"][opt]; got != code {
+			t.Errorf("Priority[%q] = %q, want %q", opt, got, code)
+		}
+	}
+}
