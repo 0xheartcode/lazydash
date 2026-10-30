@@ -16,7 +16,10 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          # Lint (staticcheck) must build and run under a Go that is at least as
+          # new as the code it analyzes, so pin to a recent toolchain rather than
+          # the module's minimum (go.mod go directive).
+          go-version: "1.27"
           cache: true
 
       - name: Install tools

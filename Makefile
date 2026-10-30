@@ -29,9 +29,10 @@ cover:
 	echo "total coverage: $$pct% (floor $(COVER_FLOOR)%)"; \
 	awk "BEGIN{exit !($$pct >= $(COVER_FLOOR))}" || { echo "coverage below floor"; exit 1; }
 
-# Install the lint tool used by the gate (kept out of the module).
+# Install the lint tool used by the gate (kept out of the module). Pinned for
+# reproducibility; needs a Go toolchain at least as new as the analyzed code.
 tools:
-	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
 # The full deterministic gate, shared by local dev and CI.
 check: fmt vet staticcheck build cover
