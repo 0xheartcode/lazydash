@@ -6,10 +6,9 @@ import (
 
 	"github.com/0xheartcode/lazydash/internal/tui/keys"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
+	"github.com/0xheartcode/lazydash/internal/version"
 	"github.com/charmbracelet/lipgloss"
 )
-
-const version = "v0.2.1"
 
 type Pane int
 
@@ -47,7 +46,7 @@ func (m *Model) SetSource(name string, offline, canWrite bool) {
 
 func (m Model) View() string {
 	left := m.hintBar()
-	right := theme.Muted.Render(fmt.Sprintf("lazydash %s", version))
+	right := theme.Muted.Render(fmt.Sprintf("lazydash %s", version.Version))
 	if m.status != "" {
 		right = theme.Muted.Render(m.status)
 	}
