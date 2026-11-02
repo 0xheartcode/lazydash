@@ -23,16 +23,20 @@ short orientation, and the `gli` spec is authoritative wherever they differ.
   for single values like title and state, observed-remove sets for labels and
   assignees), ordered by each operation's logical `(Lamport, Op-Id)`.
 
-Because reads depend only on Git, viewing issues never requires any external
-binary and works fully offline.
-
 ## Reading and writing
 
-- **Reading:** lazydash folds the operation log directly from Git.
-- **Writing:** lazydash delegates writes to the `gli` binary when it is
-  installed, so `gli` remains the single owner of operation encoding (operation
-  ids, logical clocks, set semantics). Write actions are advertised only when
-  `gli` is available, the same way GitHub write actions require the `gh` CLI.
+- **Reading (folded state):** when the `gli` binary is installed, lazydash reads
+  issues from `gli ls --format json`, so the fold (last-writer-wins registers and
+  observed-remove sets) is exactly `gli`'s. Without `gli`, lazydash falls back to
+  reading the operation log directly from Git, a best-effort fold that still lets
+  you view issues with no external binary.
+- **Timeline events:** the activity and calendar views read the operation log
+  directly from Git (each commit's date and `Op` trailer), so they work with no
+  external binary.
+- **Writing:** lazydash delegates writes to the `gli` binary, so `gli` remains the
+  single owner of operation encoding (operation ids, logical clocks, set
+  semantics). Write actions are advertised only when `gli` is available, the same
+  way GitHub write actions require the `gh` CLI.
 
 ## Compatibility
 

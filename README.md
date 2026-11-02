@@ -42,7 +42,8 @@ config key.
 
 For GitHub, [gh CLI](https://cli.github.com/) authenticated (`gh auth login`),
 also used to write (comment / close / move). For local issues you only need
-`git`; nothing else, no network.
+`git` to view them; install the `git-local-issue` tool (`gli`) for correct
+reading and for all writes (create, comment, close, label, assign).
 
 The easiest path is a prebuilt release binary. Install it with the one-line
 script:
@@ -84,9 +85,11 @@ lazydash version                            # print the version
 ```
 
 Run it **inside a repository** to work with that repo's local issues offline. The
-local backend reads issues straight from git plumbing, and authors writes as
-git commits under `refs/issues/`, so it interoperates with the `git issue` CLI
-and needs no extra tooling.
+local backend uses the [git-local-issue](https://github.com/remenoscodes/git-native-issue)
+command-line tool (`gli`) for correct reading and for all writes (create, comment,
+close, label, assign), with issues stored as git commits under `refs/issues/`. When
+`gli` is not installed, lazydash falls back to reading issues directly from git, so
+you can still view them without it.
 
 ## Keybindings
 
@@ -97,13 +100,16 @@ and needs no extra tooling.
 | `tab` / `shift+tab` | Next / previous pane |
 | `enter` | Load project · open card details |
 | `esc` | Close details / cancel a modal |
-| `[` / `]` | Cycle project views (Board / Table) |
+| `[` / `]` | Cycle project views (Board, By Priority, Table, Activity, Calendar) |
 | `o` | Open in browser |
 | `d` | Open in gh-dash |
 | `p` | Open the full issue in a pager (bat, else $PAGER, else less) |
 | `r` | Refresh |
 | `?` | Help |
 | `q` | Quit |
+
+In the Calendar view, `h` / `j` / `k` / `l` move the selected day; in the
+Activity view, `j` / `k` scroll the feed.
 
 Write actions (shown only for writable sources, gated per backend capability):
 
@@ -122,18 +128,23 @@ Write actions (shown only for writable sources, gated per backend capability):
   issues from the same board and table views, switchable with `[` / `]`.
 - **Styled Markdown detail panel.** Issue descriptions and bodies render as
   styled Markdown in the detail panel, and `p` opens the full issue in an
-  external pager (bat, else `$PAGER`, else less).
+  external pager (bat, else `$PAGER`, else less). The detail panel also shows
+  the selected issue's event history.
+- **Activity view.** A reverse-chronological feed of issue events (created,
+  commented, closed, labeled, assigned) across all local issues.
+- **Calendar view.** A month grid showing per-day issue activity.
 - **Fully offline for local issues.** Create, comment, close, move, label, assign
-  and undo, all authored as git commits under `refs/issues/`, no network, no
-  external binary.
+  and undo, all authored as git commits under `refs/issues/` via the
+  `git-local-issue` tool (`gli`), with no network required. Without `gli`,
+  issues remain viewable by reading directly from git.
 - **Manage GitHub too.** Comment, close/reopen and move cards between columns via
   the authenticated `gh` CLI.
 - **Offline cache.** The last synced GitHub board is cached, so it stays
   browsable (read-only) when you're offline.
 - **Live GitHub views.** GitHub boards and tables are fetched live from the
   Projects API, so the TUI matches the browser.
-- **Planned: timeline/roadmap view.** A roadmap view is planned for a later
-  release.
+- **Planned: roadmap view.** A roadmap (timeline-by-date) view is planned for a
+  later release.
 
 ## Config
 
