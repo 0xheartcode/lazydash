@@ -1,6 +1,8 @@
 package local
 
 import (
+	"os/exec"
+	"sort"
 	"strings"
 	"testing"
 
@@ -8,21 +10,44 @@ import (
 	"github.com/0xheartcode/lazydash/internal/source"
 )
 
-func TestCreateCommentCloseRoundTrip(t *testing.T) {
-	dir, _ := newRepo(t)
-	s := &Source{root: dir, name: "x"}
+// gliSource prepares a temp git repo with gli issue tracking initialised and
+// returns a writable Source rooted at it. It skips the test when gli is absent so
+// CI (which has no binary) stays green.
+func gliSource(t *testing.T) *Source {
+	t.Helper()
+	if !gliAvailable() {
+		t.Skip("gli binary not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, nil, "", "init", "-q")
+	runGit(t, dir, nil, "", "config", "user.email", "tester@example.com")
+	runGit(t, dir, nil, "", "config", "user.name", "Tester")
+	cmd := exec.Command("gli", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("gli init: %v\n%s", err, out)
+	}
+	return &Source{root: dir, name: "x", writable: true}
+}
+
+func TestGliCreateCommentClose(t *testing.T) {
+	s := gliSource(t)
 
 	card, err := s.CreateIssue("", source.Draft{
-		Title:    "Offline works",
-		Body:     "No network needed.",
-		Labels:   []string{"feature"},
-		Priority: "high",
+		Title:     "Offline works",
+		Body:      "No network needed.",
+		Labels:    []string{"feature"},
+		Priority:  "high",
+		Assignees: []string{"alice", "bob"},
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	if card.ID == "" {
 		t.Fatal("CreateIssue returned empty id")
+	}
+	if card.Title != "Offline works" || card.State != "OPEN" {
+		t.Errorf("card = %+v, want Title/State set", card)
 	}
 	if err := s.Comment(card, "Confirmed on a plane."); err != nil {
 		t.Fatalf("Comment: %v", err)
@@ -31,14 +56,7 @@ func TestCreateCommentCloseRoundTrip(t *testing.T) {
 		t.Fatalf("SetState: %v", err)
 	}
 
-	issues, err := ListIssues(dir)
-	if err != nil {
-		t.Fatalf("ListIssues: %v", err)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %d, want 1", len(issues))
-	}
-	got := issues[0]
+	got := onlyIssue(t, s)
 	if got.Title != "Offline works" {
 		t.Errorf("Title = %q", got.Title)
 	}
@@ -51,115 +69,116 @@ func TestCreateCommentCloseRoundTrip(t *testing.T) {
 	if strings.Join(got.Labels, ",") != "feature" {
 		t.Errorf("Labels = %v, want [feature]", got.Labels)
 	}
+	if !equalSet(got.Assignees, []string{"alice", "bob"}) {
+		t.Errorf("Assignees = %v, want alice+bob (create seeds one, the rest are added)", got.Assignees)
+	}
 	if len(got.Comments) != 1 || !strings.Contains(got.Comments[0].Body, "Confirmed") {
 		t.Errorf("Comments = %v", got.Comments)
 	}
 }
 
-func TestSetFieldPriorityAndReopen(t *testing.T) {
-	dir, _ := newRepo(t)
-	s := &Source{root: dir, name: "x"}
+func TestGliSetFieldPriorityAndReopen(t *testing.T) {
+	s := gliSource(t)
 
 	card, err := s.CreateIssue("", source.Draft{Title: "P", Priority: "low"})
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	if err := s.SetField(card, "Priority", "critical"); err != nil {
-		t.Fatalf("SetField: %v", err)
+		t.Fatalf("SetField priority: %v", err)
+	}
+	// A field gli cannot express is a no-op, not an error.
+	if err := s.SetField(card, "Milestone", "v1"); err != nil {
+		t.Fatalf("SetField milestone should be a no-op, got %v", err)
 	}
 	if err := s.SetState(card, "closed"); err != nil {
 		t.Fatalf("SetState closed: %v", err)
 	}
-	if err := s.SetState(card, "open"); err != nil {
-		t.Fatalf("SetState open: %v", err)
+	if err := s.SetField(card, "State", "open"); err != nil {
+		t.Fatalf("SetField state open: %v", err)
 	}
 
-	issues, _ := ListIssues(dir)
-	if len(issues) != 1 {
-		t.Fatalf("issues = %d, want 1", len(issues))
+	got := onlyIssue(t, s)
+	if got.Priority != "critical" {
+		t.Errorf("Priority = %q, want critical", got.Priority)
 	}
-	if issues[0].Priority != "critical" {
-		t.Errorf("Priority = %q, want critical (nearest-to-tip trailer wins)", issues[0].Priority)
-	}
-	if issues[0].State != "open" {
-		t.Errorf("State = %q, want open (reopened last)", issues[0].State)
+	if got.State != "open" {
+		t.Errorf("State = %q, want open (reopened last)", got.State)
 	}
 }
 
-func TestUndoPopsLastEvent(t *testing.T) {
-	dir, _ := newRepo(t)
-	s := &Source{root: dir, name: "x"}
+func TestGliSetLabelsAndAssigneesDiff(t *testing.T) {
+	s := gliSource(t)
 
-	card, err := s.CreateIssue("", source.Draft{Title: "Undo me"})
+	card, err := s.CreateIssue("", source.Draft{
+		Title:     "T",
+		Labels:    []string{"bug"},
+		Assignees: []string{"alice"},
+	})
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
-	if err := s.Comment(card, "a note"); err != nil {
-		t.Fatalf("Comment: %v", err)
-	}
-	if issues, _ := ListIssues(dir); len(issues[0].Comments) != 1 {
-		t.Fatalf("precondition: want 1 comment, got %d", len(issues[0].Comments))
-	}
+	// Reflect the created state back onto the card, as the TUI does from the board.
+	card.Labels = []core.Label{{Name: "bug"}}
+	card.Assignees = []string{"alice"}
 
-	if err := s.Undo(card); err != nil {
-		t.Fatalf("Undo: %v", err)
-	}
-	if issues, _ := ListIssues(dir); len(issues[0].Comments) != 0 {
-		t.Errorf("comment should be undone, got %d", len(issues[0].Comments))
-	}
-
-	// Only the create commit remains; it has no parent and cannot be undone.
-	if err := s.Undo(card); err == nil {
-		t.Error("undo of a create-only issue should error")
-	}
-}
-
-func TestSetLabelsAndAssignee(t *testing.T) {
-	dir, _ := newRepo(t)
-	s := &Source{root: dir, name: "x"}
-	card, err := s.CreateIssue("", source.Draft{Title: "T"})
-	if err != nil {
-		t.Fatalf("CreateIssue: %v", err)
-	}
+	// Want {bug, ui}: adds ui, keeps bug.
 	if err := s.SetLabels(card, []string{"bug", "ui"}); err != nil {
 		t.Fatalf("SetLabels: %v", err)
 	}
-	if err := s.SetAssignees(card, []string{"alice@example.com"}); err != nil {
+	// Want {carol}: adds carol, removes alice.
+	if err := s.SetAssignees(card, []string{"carol"}); err != nil {
 		t.Fatalf("SetAssignees: %v", err)
 	}
-	issues, _ := ListIssues(dir)
-	got := issues[0]
-	if strings.Join(got.Labels, ",") != "bug,ui" {
-		t.Errorf("Labels = %v, want [bug ui]", got.Labels)
+
+	got := onlyIssue(t, s)
+	if !equalSet(got.Labels, []string{"bug", "ui"}) {
+		t.Errorf("Labels = %v, want bug+ui", got.Labels)
 	}
-	if got.Assignee != "alice@example.com" {
-		t.Errorf("Assignee = %q", got.Assignee)
+	if !equalSet(got.Assignees, []string{"carol"}) {
+		t.Errorf("Assignees = %v, want [carol]", got.Assignees)
+	}
+
+	// A no-op diff (same set, order-independent) issues no edit and no error.
+	card.Labels = []core.Label{{Name: "ui"}, {Name: "bug"}}
+	if err := s.SetLabels(card, []string{"bug", "ui"}); err != nil {
+		t.Fatalf("SetLabels no-op: %v", err)
 	}
 }
 
-func TestCanonicalTrailerKey(t *testing.T) {
-	cases := map[string]string{
-		"priority":  "Priority",
-		"labels":    "Labels",
-		"label":     "Labels",
-		"assignee":  "Assignee",
-		"assignees": "Assignee",
-		"milestone": "Milestone",
-		"state":     "State",
-		"custom":    "Custom", // unknown keys are title-cased
-		"":          "",
-	}
-	for in, want := range cases {
-		if got := canonicalTrailerKey(in); got != want {
-			t.Errorf("canonicalTrailerKey(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestAppendEventUnknownIssue(t *testing.T) {
-	dir, _ := newRepo(t)
-	s := &Source{root: dir, name: "x"}
-	if err := s.Comment(core.Card{ID: "does-not-exist"}, "hi"); err == nil {
+func TestGliCommentMissingIssue(t *testing.T) {
+	s := gliSource(t)
+	if err := s.Comment(core.Card{ID: "ffffffffffffffffffffffffffffffff"}, "hi"); err == nil {
 		t.Error("Comment on a missing issue should error")
 	}
+}
+
+// onlyIssue reads the single issue in the repo through the gli reader.
+func onlyIssue(t *testing.T, s *Source) Issue {
+	t.Helper()
+	issues, err := ListIssuesGli(s.root)
+	if err != nil {
+		t.Fatalf("ListIssuesGli: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %d, want 1", len(issues))
+	}
+	return issues[0]
+}
+
+// equalSet reports whether a and b contain the same values, ignoring order.
+func equalSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ac := append([]string(nil), a...)
+	bc := append([]string(nil), b...)
+	sort.Strings(ac)
+	sort.Strings(bc)
+	for i := range ac {
+		if ac[i] != bc[i] {
+			return false
+		}
+	}
+	return true
 }

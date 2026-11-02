@@ -66,8 +66,9 @@ func AsWriter(s Source) (Writer, bool) {
 }
 
 // Undoer is implemented by sources that can reverse the last change to an item.
-// The local backend can (an issue is an append-only commit chain, so undo is a
-// ref reset); GitHub cannot, so it simply does not implement this.
+// No backend currently implements it: the local backend delegates writes to the
+// git-local-issue tool, which owns its append-only operation chain, so the TUI
+// treats undo as unavailable when a source does not implement this.
 type Undoer interface {
 	Undo(item core.Card) error
 }

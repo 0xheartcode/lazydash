@@ -8,7 +8,7 @@ import (
 
 func TestBuildBoardSynthesizesFieldsAndGroups(t *testing.T) {
 	issues := []Issue{
-		{ID: "1", Title: "A", State: "open", Priority: "high", Labels: []string{"bug"}, Assignee: "x@y.z"},
+		{ID: "1", Title: "A", State: "open", Priority: "high", Labels: []string{"bug"}, Assignees: []string{"x@y.z"}},
 		{ID: "2", Title: "B", State: "closed", Priority: "low"},
 	}
 	bd := buildBoard(issues)
@@ -37,6 +37,13 @@ func TestBuildBoardSynthesizesFieldsAndGroups(t *testing.T) {
 }
 
 func TestSourceNewAndGetBoard(t *testing.T) {
+	// This exercises the git-plumbing fallback reader, which authors issues in
+	// lazydash's own commit format. gli cannot read that format, so skip when the
+	// binary is present (GetBoard would route through gli). The gli path has its
+	// own end-to-end coverage in gli_test.go.
+	if gliAvailable() {
+		t.Skip("gli present: GetBoard routes through gli, which cannot read the hand-rolled fallback format")
+	}
 	dir, tree := newRepo(t)
 	msg := "Wire up offline mode\n\nMake it work without a network.\n\nState: open\nPriority: high\n"
 	r := commitTree(t, dir, tree, "", msg, "2026-03-01T12:00:00")
@@ -79,7 +86,7 @@ func TestNewReturnsNilWithoutIssues(t *testing.T) {
 func TestIssueToItemMapping(t *testing.T) {
 	item := issueToItem(Issue{
 		ID: "1", Title: "A", State: "open", Priority: "high",
-		Labels: []string{"bug", "auth"}, Assignee: "x@y.z", Milestone: "v1",
+		Labels: []string{"bug", "auth"}, Assignees: []string{"x@y.z"}, Milestone: "v1",
 	})
 
 	if item.Type != "ISSUE" {

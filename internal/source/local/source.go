@@ -15,12 +15,13 @@ const localProjectID = "local"
 // the repo's issues as a single project with synthesized fields and views, so
 // the board/table renderer treats them exactly like a GitHub project.
 type Source struct {
-	root string // repo working-tree root
-	name string // display name (repo basename)
+	root     string // repo working-tree root
+	name     string // display name (repo basename)
+	writable bool   // gli binary present, so mutations can be shelled out
 }
 
 // New builds a local Source for the repo containing dir. It returns (nil, nil)
-// when dir is not inside a git repo or the repo has no refs/issues/ — an absent
+// when dir is not inside a git repo or the repo has no refs/issues/: an absent
 // local backend is a normal condition (most repos have no local issues), not an
 // error that should be surfaced to the user.
 func New(dir string) (*Source, error) {
@@ -31,24 +32,24 @@ func New(dir string) (*Source, error) {
 	if !HasIssues(root) {
 		return nil, nil
 	}
-	return &Source{root: root, name: filepath.Base(root)}, nil
+	return &Source{root: root, name: filepath.Base(root), writable: gliAvailable()}, nil
 }
 
 // Name identifies this backend.
 func (s *Source) Name() string { return "local" }
 
-// Caps reports the backend's capabilities. It works fully offline and supports
-// the whole mutation surface, since writes are authored with git plumbing and
-// need no external binary.
+// Caps reports the backend's capabilities. Reads always work offline (via the
+// git-plumbing fallback), but every mutation shells out to gli, so the write
+// flags are gated on the binary being present.
 func (s *Source) Caps() source.Capabilities {
 	return source.Capabilities{
 		Offline:  true,
-		Create:   true,
-		Comment:  true,
-		SetState: true,
-		SetField: true,
-		Labels:   true,
-		Assign:   true,
+		Create:   s.writable,
+		Comment:  s.writable,
+		SetState: s.writable,
+		SetField: s.writable,
+		Labels:   s.writable,
+		Assign:   s.writable,
 	}
 }
 
@@ -62,13 +63,25 @@ func (s *Source) ListProjects() ([]core.Project, error) {
 }
 
 // GetBoard reads the repo's issues and folds them into a board with synthesized
-// State/Priority fields and Board/Priority/Table views.
+// State/Priority fields and Board/Priority/Table views. When the gli binary is
+// present the folded state comes from its JSON output; otherwise it falls back
+// to the git-plumbing reader so viewing still works with no binary.
 func (s *Source) GetBoard(string) (*core.BoardData, error) {
-	issues, err := ListIssues(s.root)
+	issues, err := s.listIssues()
 	if err != nil {
 		return nil, err
 	}
 	return buildBoard(issues), nil
+}
+
+// listIssues folds the repo's issues through gli when it is available, and
+// through the git-plumbing reader otherwise. Both paths yield the same Issue
+// shape.
+func (s *Source) listIssues() ([]Issue, error) {
+	if gliAvailable() {
+		return ListIssuesGli(s.root)
+	}
+	return ListIssues(s.root)
 }
 
 // buildBoard maps reconstructed issues onto the core board model. git-native-issue
@@ -126,11 +139,6 @@ func issueToItem(iss Issue) core.RawItem {
 		fv["Milestone"] = iss.Milestone
 	}
 
-	var assignees []string
-	if iss.Assignee != "" {
-		assignees = []string{iss.Assignee}
-	}
-
 	var labels []core.Label
 	for _, name := range iss.Labels {
 		labels = append(labels, core.Label{Name: name, Color: labelColor(name)})
@@ -138,10 +146,12 @@ func issueToItem(iss Issue) core.RawItem {
 
 	return core.RawItem{
 		ID:          iss.ID,
+		Number:      iss.Number,
 		Type:        "ISSUE",
 		Title:       iss.Title,
 		State:       strings.ToUpper(iss.State), // OPEN/CLOSED drives the item icon
-		Assignees:   assignees,
+		IsArchived:  iss.Archived,
+		Assignees:   append([]string(nil), iss.Assignees...),
 		Labels:      labels,
 		Body:        issueBody(iss),
 		FieldValues: fv,
@@ -160,7 +170,7 @@ func issueBody(iss Issue) string {
 		if who == "" {
 			who = "comment"
 		}
-		b.WriteString("— " + who + ":\n" + c.Body)
+		b.WriteString(who + ":\n" + c.Body)
 	}
 	return b.String()
 }

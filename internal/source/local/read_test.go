@@ -25,7 +25,7 @@ func runGit(t *testing.T, dir string, env []string, stdin string, args ...string
 }
 
 // commitTree writes an empty-tree commit with msg, an optional parent, and a
-// fixed date — mirroring how git-native-issue records an issue event.
+// fixed date, mirroring how git-native-issue records an issue event.
 func commitTree(t *testing.T, dir, tree, parent, msg, date string) string {
 	t.Helper()
 	env := []string{

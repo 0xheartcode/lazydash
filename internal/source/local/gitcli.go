@@ -17,7 +17,7 @@ func git(dir string, args ...string) (string, error) {
 	return gitInput(dir, "", args...)
 }
 
-// gitInput is git with data piped to stdin — used for commit-tree (the message)
+// gitInput is git with data piped to stdin, used for commit-tree (the message)
 // and mktree (empty input yields the empty tree).
 func gitInput(dir, stdin string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)

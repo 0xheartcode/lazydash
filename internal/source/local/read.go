@@ -18,19 +18,24 @@ const (
 )
 
 // Issue is a single git-native-issue issue, reconstructed by folding its commit
-// chain (create → comments → state changes) into the current state.
+// chain (create → comments → state changes) into the current state. The same
+// shape is produced by both readers: the git-plumbing fallback and the gli JSON
+// parser.
 type Issue struct {
-	ID        string // UUID: the ref name under refs/issues/
-	Title     string
-	Body      string
-	State     string // "open" | "closed"
-	Labels    []string
-	Assignee  string
-	Priority  string
-	Milestone string
-	Comments  []Comment
-	CreatedAt string // ISO-8601 date of the create commit
-	UpdatedAt string // ISO-8601 date of the tip commit
+	ID           string // permanent handle: the issue UUID (ref name under refs/issues/)
+	Number       int    // display number (gli only; 0 from the git fallback)
+	Title        string
+	Body         string
+	State        string // "open" | "closed"
+	Labels       []string
+	Assignees    []string // the assignee OR-set (gli supports several)
+	Priority     string
+	Milestone    string
+	Archived     bool // hidden from default listings (gli only)
+	CommentCount int  // number of comments as reported by the source
+	Comments     []Comment
+	CreatedAt    string // ISO-8601 date of the create commit
+	UpdatedAt    string // ISO-8601 date of the tip commit
 }
 
 // Comment is one comment event in an issue's history.
@@ -134,7 +139,7 @@ func readIssue(root, ref string) (Issue, error) {
 		}
 		if !haveAssignee {
 			if v, ok := t["Assignee"]; ok {
-				iss.Assignee = v
+				iss.Assignees = splitList(v)
 				haveAssignee = true
 			}
 		}
@@ -160,6 +165,7 @@ func readIssue(root, ref string) (Issue, error) {
 		}
 		iss.Comments = append(iss.Comments, Comment{Author: c.author, Date: c.date, Body: body})
 	}
+	iss.CommentCount = len(iss.Comments)
 	return iss, nil
 }
 
@@ -194,8 +200,8 @@ func parseCommits(out string) []commit {
 var trailerLine = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9-]*):[ \t]*(.*)$`)
 
 // parseMessage splits a raw commit message (%B, which begins with the subject
-// line) into its description — the prose after the subject, minus the trailing
-// metadata block — and its trailers.
+// line) into its description (the prose after the subject, minus the trailing
+// metadata block) and its trailers.
 func parseMessage(raw string) (description string, trailers map[string]string) {
 	trailers = map[string]string{}
 	lines := strings.Split(raw, "\n")

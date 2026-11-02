@@ -1,7 +1,6 @@
 package local
 
 import (
-	"crypto/rand"
 	"fmt"
 	"strings"
 
@@ -9,202 +8,197 @@ import (
 	"github.com/0xheartcode/lazydash/internal/source"
 )
 
-// formatVersion tags issues we create with the git-native-issue format version.
-const formatVersion = "1"
-
-// Compile-time proof the local backend implements the read, write and undo
-// interfaces.
+// Compile-time proof the local backend implements the read and write interfaces.
+// It deliberately does not implement source.Undoer: gli owns the append-only
+// operation chain, so lazydash does not reach past it with a raw ref reset.
 var (
 	_ source.Source = (*Source)(nil)
 	_ source.Writer = (*Source)(nil)
-	_ source.Undoer = (*Source)(nil)
 )
 
-// The local backend authors the same commit format its reader parses, so writes
-// need no external binary and work fully offline. Each mutation is one commit
-// under refs/issues/<id>: a create commit roots a new chain, everything else is
-// appended onto the current tip with a compare-and-swap ref update.
+// Local mutations shell out to gli, the tool that owns the on-disk issue format.
+// Each write is one gli invocation run at the repo root; gli accepts either the
+// issue UUID (what the reader stamps onto a card) or a short id as the <ID>.
 
-// CreateIssue roots a new issue chain under a fresh refs/issues/<uuid>.
+// CreateIssue mints a new issue with `gli create` and returns a card keyed by the
+// short id gli prints. The board is reloaded after any write, so the exact handle
+// on the returned card is not load-bearing beyond Title and State.
 func (s *Source) CreateIssue(_ string, d source.Draft) (core.Card, error) {
-	if strings.TrimSpace(d.Title) == "" {
+	title := strings.TrimSpace(d.Title)
+	if title == "" {
 		return core.Card{}, fmt.Errorf("issue title is required")
 	}
-	id, err := newUUID()
+	args := []string{"create", title, "-q"}
+	if body := strings.TrimSpace(d.Body); body != "" {
+		args = append(args, "-d", body)
+	}
+	for _, l := range d.Labels {
+		if l = strings.TrimSpace(l); l != "" {
+			args = append(args, "-l", l)
+		}
+	}
+	if p := strings.TrimSpace(d.Priority); p != "" {
+		args = append(args, "-p", p)
+	}
+	// gli create sets a single assignee; any further assignees are added below.
+	var extraAssignees []string
+	for i, a := range d.Assignees {
+		if a = strings.TrimSpace(a); a == "" {
+			continue
+		}
+		if i == 0 {
+			args = append(args, "-a", a)
+		} else {
+			extraAssignees = append(extraAssignees, a)
+		}
+	}
+
+	out, err := gli(s.root, args...)
 	if err != nil {
 		return core.Card{}, err
 	}
-	tree, err := s.emptyTree()
-	if err != nil {
-		return core.Card{}, err
+	id := strings.TrimSpace(out)
+
+	for _, a := range extraAssignees {
+		if _, err := gli(s.root, "edit", id, "--add-assignee", a); err != nil {
+			return core.Card{}, err
+		}
 	}
-	commit, err := gitInput(s.root, createMessage(d), "commit-tree", tree)
-	if err != nil {
-		return core.Card{}, err
-	}
-	if _, err := git(s.root, "update-ref", issueRefPrefix+id, strings.TrimSpace(commit)); err != nil {
-		return core.Card{}, err
-	}
-	return core.Card{ID: id, Type: "ISSUE", Title: d.Title, State: "OPEN"}, nil
+	return core.Card{ID: id, Type: "ISSUE", Title: title, State: "OPEN"}, nil
 }
 
-// Comment appends a comment event.
+// Comment appends a comment with `gli comment`.
 func (s *Source) Comment(item core.Card, body string) error {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return fmt.Errorf("empty comment")
 	}
-	return s.appendEvent(item.ID, body, nil)
+	id, err := issueID(item)
+	if err != nil {
+		return err
+	}
+	_, err = gli(s.root, "comment", id, body)
+	return err
 }
 
-// SetState closes or reopens an issue by appending a state event.
+// SetState closes or reopens an issue with `gli close` / `gli reopen`.
 func (s *Source) SetState(item core.Card, state string) error {
-	state = strings.ToLower(strings.TrimSpace(state))
-	subject := "Reopen issue"
-	if state == "closed" {
-		subject = "Close issue"
+	id, err := issueID(item)
+	if err != nil {
+		return err
 	}
-	return s.appendEvent(item.ID, subject, map[string]string{"State": state})
+	verb := "reopen"
+	if strings.EqualFold(strings.TrimSpace(state), "closed") {
+		verb = "close"
+	}
+	_, err = gli(s.root, verb, id)
+	return err
 }
 
-// SetField sets a single-select field. State maps to close/reopen; every other
-// field is recorded as a trailer of the same (canonicalised) name.
+// SetField sets a single-select field. State maps to close/reopen and Priority
+// maps to `gli edit -p`; any other field is a no-op, since gli has no general
+// single-select surface to express it.
 func (s *Source) SetField(item core.Card, field, option string) error {
-	if strings.EqualFold(field, "State") {
-		return s.SetState(item, option)
-	}
-	key := canonicalTrailerKey(field)
-	return s.appendEvent(item.ID, "Set "+key+": "+option, map[string]string{key: option})
-}
-
-// SetLabels replaces the label set.
-func (s *Source) SetLabels(item core.Card, labels []string) error {
-	return s.appendEvent(item.ID, "Update labels", map[string]string{"Labels": strings.Join(labels, ", ")})
-}
-
-// SetAssignees replaces the assignee.
-func (s *Source) SetAssignees(item core.Card, who []string) error {
-	return s.appendEvent(item.ID, "Update assignee", map[string]string{"Assignee": strings.Join(who, ", ")})
-}
-
-// Undo pops the most recent event off an issue's chain by resetting its ref to
-// the tip's parent. Because the chain is append-only this cleanly reverses the
-// last comment or state/field change; the popped commit stays in the object
-// store (recoverable via reflog). The create commit has no parent and cannot be
-// undone this way.
-func (s *Source) Undo(item core.Card) error {
-	ref := issueRefPrefix + item.ID
-	tip, err := git(s.root, "rev-parse", "--verify", ref)
-	if err != nil {
-		return fmt.Errorf("issue %s not found", item.ID)
-	}
-	tip = strings.TrimSpace(tip)
-	parent, err := git(s.root, "rev-parse", "--verify", tip+"^")
-	if err != nil {
-		return fmt.Errorf("nothing to undo — issue has only its creation event")
-	}
-	_, err = git(s.root, "update-ref", ref, strings.TrimSpace(parent), tip)
-	return err
-}
-
-// appendEvent commits a new event (subject plus optional trailers) onto the tip
-// of an issue's chain, using a compare-and-swap ref update so a concurrent write
-// is rejected rather than silently lost.
-func (s *Source) appendEvent(id, subject string, trailers map[string]string) error {
-	ref := issueRefPrefix + id
-	tip, err := git(s.root, "rev-parse", "--verify", ref)
-	if err != nil {
-		return fmt.Errorf("issue %s not found", id)
-	}
-	tip = strings.TrimSpace(tip)
-	tree, err := s.emptyTree()
-	if err != nil {
-		return err
-	}
-	commit, err := gitInput(s.root, buildMessage(subject, "", trailers), "commit-tree", tree, "-p", tip)
-	if err != nil {
-		return err
-	}
-	_, err = git(s.root, "update-ref", ref, strings.TrimSpace(commit), tip)
-	return err
-}
-
-// emptyTree returns the repo's empty tree object, writing it if needed.
-func (s *Source) emptyTree() (string, error) {
-	out, err := gitInput(s.root, "", "mktree")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
-}
-
-// createMessage builds the root commit message for a new issue.
-func createMessage(d source.Draft) string {
-	trailers := map[string]string{"State": "open", "Format-Version": formatVersion}
-	if len(d.Labels) > 0 {
-		trailers["Labels"] = strings.Join(d.Labels, ", ")
-	}
-	if d.Priority != "" {
-		trailers["Priority"] = d.Priority
-	}
-	if len(d.Assignees) > 0 {
-		trailers["Assignee"] = strings.Join(d.Assignees, ", ")
-	}
-	return buildMessage(d.Title, d.Body, trailers)
-}
-
-// buildMessage assembles a commit message: subject, optional body, then the
-// trailer block in a stable key order.
-func buildMessage(subject, body string, trailers map[string]string) string {
-	var b strings.Builder
-	b.WriteString(subject)
-	if body = strings.TrimSpace(body); body != "" {
-		b.WriteString("\n\n")
-		b.WriteString(body)
-	}
-	order := []string{"State", "Priority", "Labels", "Assignee", "Milestone", "Fixed-By", "Format-Version"}
-	var lines []string
-	for _, k := range order {
-		if v := strings.TrimSpace(trailers[k]); v != "" {
-			lines = append(lines, k+": "+v)
-		}
-	}
-	if len(lines) > 0 {
-		b.WriteString("\n\n")
-		b.WriteString(strings.Join(lines, "\n"))
-	}
-	b.WriteString("\n")
-	return b.String()
-}
-
-// canonicalTrailerKey maps a field name to its trailer key spelling.
-func canonicalTrailerKey(field string) string {
-	switch strings.ToLower(field) {
-	case "priority":
-		return "Priority"
-	case "labels", "label":
-		return "Labels"
-	case "assignee", "assignees":
-		return "Assignee"
-	case "milestone":
-		return "Milestone"
+	switch strings.ToLower(strings.TrimSpace(field)) {
 	case "state":
-		return "State"
-	default:
-		if field == "" {
-			return field
+		return s.SetState(item, option)
+	case "priority":
+		id, err := issueID(item)
+		if err != nil {
+			return err
 		}
-		return strings.ToUpper(field[:1]) + field[1:]
+		_, err = gli(s.root, "edit", id, "-p", option)
+		return err
+	default:
+		return nil
 	}
 }
 
-// newUUID returns a random RFC 4122 version-4 UUID, used to name issue refs.
-func newUUID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
+// SetLabels reconciles the issue's labels with the desired set. gli has no
+// wholesale "set labels", so the difference against the card's current labels is
+// issued as --add-label / --remove-label edits.
+func (s *Source) SetLabels(item core.Card, labels []string) error {
+	id, err := issueID(item)
+	if err != nil {
+		return err
 	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+	current := make([]string, 0, len(item.Labels))
+	for _, l := range item.Labels {
+		current = append(current, l.Name)
+	}
+	add, remove := diffSets(current, labels)
+	var args []string
+	for _, l := range add {
+		args = append(args, "--add-label", l)
+	}
+	for _, l := range remove {
+		args = append(args, "--remove-label", l)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	_, err = gli(s.root, append([]string{"edit", id}, args...)...)
+	return err
+}
+
+// SetAssignees reconciles the issue's assignees with the desired set, issuing the
+// --add-assignee / --remove-assignee edits for the difference against the card's
+// current assignees.
+func (s *Source) SetAssignees(item core.Card, who []string) error {
+	id, err := issueID(item)
+	if err != nil {
+		return err
+	}
+	add, remove := diffSets(item.Assignees, who)
+	var args []string
+	for _, a := range add {
+		args = append(args, "--add-assignee", a)
+	}
+	for _, a := range remove {
+		args = append(args, "--remove-assignee", a)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	_, err = gli(s.root, append([]string{"edit", id}, args...)...)
+	return err
+}
+
+// issueID returns the gli id for a card (its stamped UUID), or an error when the
+// card carries no id to address.
+func issueID(item core.Card) (string, error) {
+	id := strings.TrimSpace(item.ID)
+	if id == "" {
+		return "", fmt.Errorf("item has no id")
+	}
+	return id, nil
+}
+
+// diffSets returns the items to add (in want, not in have) and to remove (in
+// have, not in want), comparing trimmed non-empty values.
+func diffSets(have, want []string) (add, remove []string) {
+	haveSet := toSet(have)
+	wantSet := toSet(want)
+	for v := range wantSet {
+		if !haveSet[v] {
+			add = append(add, v)
+		}
+	}
+	for v := range haveSet {
+		if !wantSet[v] {
+			remove = append(remove, v)
+		}
+	}
+	return add, remove
+}
+
+// toSet collects trimmed, non-empty values into a set.
+func toSet(items []string) map[string]bool {
+	set := make(map[string]bool, len(items))
+	for _, v := range items {
+		if v = strings.TrimSpace(v); v != "" {
+			set[v] = true
+		}
+	}
+	return set
 }
