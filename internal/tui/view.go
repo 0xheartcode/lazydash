@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -65,6 +66,21 @@ func (m Model) detailsView() string {
 	return m.overlay(m.sidebar.View())
 }
 
+// issueHistory returns the op-log events for one issue, newest-first. The source
+// already sorts BoardData.Events newest-first, so filtering preserves order.
+func (m Model) issueHistory(issueID string) []core.Event {
+	if m.boardData == nil || issueID == "" {
+		return nil
+	}
+	var out []core.Event
+	for _, e := range m.boardData.Events {
+		if e.IssueID == issueID {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // overlay centers a box over the whole viewport.
 func (m Model) overlay(box string) string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
@@ -88,8 +104,9 @@ func (m Model) helpView() string {
 		theme.HelpKey.Render("  tab / shift+tab") + "  " + theme.HelpDesc.Render("cycle panes (PROJECTS ↔ BOARD)"),
 		theme.HelpKey.Render("  j / k          ") + "  " + theme.HelpDesc.Render("move up / down"),
 		theme.HelpKey.Render("  h / l          ") + "  " + theme.HelpDesc.Render("move left / right (board columns only)"),
-		theme.HelpKey.Render("  [ / ]          ") + "  " + theme.HelpDesc.Render("switch project views"),
-		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("load project · open card details"),
+		theme.HelpKey.Render("  [ / ]          ") + "  " + theme.HelpDesc.Render("switch views (Board, By Priority, Table, Activity, Calendar)"),
+		theme.HelpKey.Render("                 ") + "  " + theme.HelpDesc.Render("Activity is the issue op-log; Calendar is a month grid (h/j/k/l pick a day)"),
+		theme.HelpKey.Render("  enter          ") + "  " + theme.HelpDesc.Render("load project · open card details (with per-issue history)"),
 		theme.HelpKey.Render("  esc            ") + "  " + theme.HelpDesc.Render("close details / overlay"),
 		"",
 		theme.HelpKey.Render("Actions"),

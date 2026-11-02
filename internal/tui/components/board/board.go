@@ -3,6 +3,7 @@ package board
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
@@ -30,6 +31,11 @@ type Model struct {
 	tableScroll   int
 	visibleFields []core.VisibleField
 	optionColors  map[string]map[string]string // fieldName → optionName → terminal color
+
+	// activity + calendar modes
+	events      []core.Event
+	eventCursor int
+	calCursor   time.Time // selected day in the calendar grid
 }
 
 func New() Model { return Model{layout: "BOARD_LAYOUT"} }
@@ -56,16 +62,39 @@ func (m *Model) SetTableItems(items []core.Card) {
 func (m *Model) SetVisibleFields(fields []core.VisibleField)         { m.visibleFields = fields }
 func (m *Model) SetOptionColors(colors map[string]map[string]string) { m.optionColors = colors }
 
+// SetEvents loads the op-log for the Activity and Calendar views. The feed
+// cursor resets to the newest event, and the calendar's selected day snaps to
+// the newest event's date (or today when the log is empty).
+func (m *Model) SetEvents(events []core.Event) {
+	m.events = events
+	m.eventCursor = 0
+	m.calCursor = time.Now()
+	if len(events) > 0 {
+		if t, err := time.Parse(time.RFC3339, events[0].Date); err == nil {
+			m.calCursor = t
+		}
+	}
+}
+
 // --- Navigation ---
 
 func (m *Model) MoveUp() {
-	if m.layout == "TABLE_LAYOUT" {
+	switch m.layout {
+	case "TABLE_LAYOUT":
 		if m.tableRow > 0 {
 			m.tableRow--
 			if m.tableRow < m.tableScroll {
 				m.tableScroll = m.tableRow
 			}
 		}
+		return
+	case "ACTIVITY_LAYOUT":
+		if m.eventCursor > 0 {
+			m.eventCursor--
+		}
+		return
+	case "CALENDAR_LAYOUT":
+		m.calCursor = m.calCursor.AddDate(0, 0, -7)
 		return
 	}
 	if m.cardIdx > 0 {
@@ -74,7 +103,8 @@ func (m *Model) MoveUp() {
 }
 
 func (m *Model) MoveDown() {
-	if m.layout == "TABLE_LAYOUT" {
+	switch m.layout {
+	case "TABLE_LAYOUT":
 		if m.tableRow < len(m.tableItems)-1 {
 			m.tableRow++
 			visible := m.tableVisibleRows()
@@ -82,6 +112,14 @@ func (m *Model) MoveDown() {
 				m.tableScroll = m.tableRow - visible + 1
 			}
 		}
+		return
+	case "ACTIVITY_LAYOUT":
+		if m.eventCursor < len(m.events)-1 {
+			m.eventCursor++
+		}
+		return
+	case "CALENDAR_LAYOUT":
+		m.calCursor = m.calCursor.AddDate(0, 0, 7)
 		return
 	}
 	if len(m.columns) == 0 {
@@ -94,7 +132,11 @@ func (m *Model) MoveDown() {
 }
 
 func (m *Model) MoveLeft() {
-	if m.layout == "TABLE_LAYOUT" {
+	switch m.layout {
+	case "TABLE_LAYOUT", "ACTIVITY_LAYOUT":
+		return
+	case "CALENDAR_LAYOUT":
+		m.calCursor = m.calCursor.AddDate(0, 0, -1)
 		return
 	}
 	if m.colIdx > 0 {
@@ -104,7 +146,11 @@ func (m *Model) MoveLeft() {
 }
 
 func (m *Model) MoveRight() {
-	if m.layout == "TABLE_LAYOUT" {
+	switch m.layout {
+	case "TABLE_LAYOUT", "ACTIVITY_LAYOUT":
+		return
+	case "CALENDAR_LAYOUT":
+		m.calCursor = m.calCursor.AddDate(0, 0, 1)
 		return
 	}
 	if m.colIdx < len(m.columns)-1 {
@@ -126,6 +172,31 @@ func (m Model) Counts() (columns, cards int) {
 		cards += len(c.Cards)
 	}
 	return len(m.columns), cards
+}
+
+// EventCount reports how many op-log events are loaded, for the snapshot seam.
+func (m Model) EventCount() int { return len(m.events) }
+
+// SelectedEvent returns the event under the feed cursor in the Activity view, or
+// nil in any other layout.
+func (m Model) SelectedEvent() *core.Event {
+	if m.layout != "ACTIVITY_LAYOUT" {
+		return nil
+	}
+	if m.eventCursor < 0 || m.eventCursor >= len(m.events) {
+		return nil
+	}
+	e := m.events[m.eventCursor]
+	return &e
+}
+
+// SelectedDay returns the selected calendar day as YYYY-MM-DD in the Calendar
+// view, or "" in any other layout.
+func (m Model) SelectedDay() string {
+	if m.layout != "CALENDAR_LAYOUT" || m.calCursor.IsZero() {
+		return ""
+	}
+	return m.calCursor.Format("2006-01-02")
 }
 
 func (m Model) SelectedCard() *core.Card {
@@ -158,9 +229,14 @@ func (m Model) View() string {
 	innerH := m.height - 2
 
 	var content string
-	if m.layout == "TABLE_LAYOUT" {
+	switch m.layout {
+	case "TABLE_LAYOUT":
 		content = m.renderTable(innerW, innerH)
-	} else {
+	case "ACTIVITY_LAYOUT":
+		content = m.renderActivity(innerW, innerH)
+	case "CALENDAR_LAYOUT":
+		content = m.renderCalendar(innerW, innerH)
+	default:
 		content = m.renderBoard(innerW, innerH)
 	}
 
@@ -515,4 +591,184 @@ func renderColumn(col core.Column, active bool, selectedCard, width, height int)
 			BorderForeground(theme.ColorBorder)
 	}
 	return colStyle.Render(strings.Join(lines, "\n"))
+}
+
+// --- Activity rendering ---
+
+// renderActivity draws the op-log as a reverse-chronological, scrollable list,
+// one line per event, with a cursor driven by j/k.
+func (m Model) renderActivity(innerW, innerH int) string {
+	tabBar := m.renderTabBar(innerW)
+	lines := []string{tabBar}
+
+	if len(m.events) == 0 {
+		lines = append(lines, "", theme.Muted.Render("  No activity recorded yet"))
+		return strings.Join(lines, "\n")
+	}
+
+	visible := innerH - 1
+	if visible < 1 {
+		visible = 1
+	}
+	scroll := 0
+	if m.eventCursor >= visible {
+		scroll = m.eventCursor - visible + 1
+	}
+	end := scroll + visible
+	if end > len(m.events) {
+		end = len(m.events)
+	}
+
+	const dateW, kindW, actorW = 17, 12, 14
+	titleW := innerW - 2 - dateW - kindW - actorW - 3
+	if titleW < 10 {
+		titleW = 10
+	}
+
+	for i := scroll; i < end; i++ {
+		e := m.events[i]
+		cursor := "  "
+		title := theme.CardTitle.Render(utils.Truncate(e.IssueTitle, titleW))
+		if i == m.eventCursor {
+			cursor = theme.CardCursor.Render("> ")
+			title = theme.CardSelected.Render(utils.Truncate(e.IssueTitle, titleW))
+		}
+		date := theme.Muted.Width(dateW).Render(utils.Truncate(shortDateTime(e.Date), dateW))
+		kind := eventKindStyle(e.Kind).Width(kindW).Render(utils.Truncate(e.Kind, kindW))
+		actor := theme.Muted.Width(actorW).Render(utils.Truncate(e.Actor, actorW))
+		lines = append(lines, cursor+date+kind+lipgloss.NewStyle().Width(titleW+1).Render(title)+actor)
+	}
+
+	if len(m.events) > visible {
+		pct := 0
+		if len(m.events) > 1 {
+			pct = m.eventCursor * 100 / (len(m.events) - 1)
+		}
+		lines = append(lines, theme.Muted.Render(fmt.Sprintf("  %d/%d (%d%%)", m.eventCursor+1, len(m.events), pct)))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// --- Calendar rendering ---
+
+// renderCalendar draws the selected day's month as a grid (weeks as rows, days
+// as cells with a per-day activity marker), with the selected day highlighted,
+// and lists that day's events below the grid. h/l/j/k move the selected day and
+// roll across months at the edges.
+func (m Model) renderCalendar(innerW, innerH int) string {
+	tabBar := m.renderTabBar(innerW)
+
+	cur := m.calCursor
+	if cur.IsZero() {
+		cur = time.Now()
+	}
+
+	counts := map[string]int{}
+	for _, e := range m.events {
+		if t, err := time.Parse(time.RFC3339, e.Date); err == nil {
+			counts[t.Format("2006-01-02")]++
+		}
+	}
+
+	year, month := cur.Year(), cur.Month()
+	loc := cur.Location()
+	first := time.Date(year, month, 1, 0, 0, 0, 0, loc)
+	startOffset := int(first.Weekday()) // Sunday = 0
+	daysInMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+
+	header := []string{
+		theme.Title.Render(cur.Format("January 2006")),
+		theme.Subtitle.Render(" Su  Mo  Tu  We  Th  Fr  Sa"),
+	}
+
+	var rows []string
+	var week []string
+	for i := 0; i < startOffset; i++ {
+		week = append(week, "    ")
+	}
+	for day := 1; day <= daysInMonth; day++ {
+		d := time.Date(year, month, day, 0, 0, 0, 0, loc)
+		week = append(week, dayCell(day, counts[d.Format("2006-01-02")], sameDay(d, cur)))
+		if len(week) == 7 {
+			rows = append(rows, strings.Join(week, ""))
+			week = nil
+		}
+	}
+	if len(week) > 0 {
+		rows = append(rows, strings.Join(week, ""))
+	}
+
+	grid := lipgloss.JoinVertical(lipgloss.Left, append(header, rows...)...)
+
+	// Selected-day panel.
+	selKey := cur.Format("2006-01-02")
+	panel := []string{
+		theme.Subtitle.Render(cur.Format("Mon, Jan 2 2006")),
+		theme.Muted.Render(strings.Repeat("─", 28)),
+	}
+	shown := 0
+	for _, e := range m.events {
+		t, err := time.Parse(time.RFC3339, e.Date)
+		if err != nil || t.Format("2006-01-02") != selKey {
+			continue
+		}
+		kind := eventKindStyle(e.Kind).Render(utils.Truncate(e.Kind, 12))
+		panel = append(panel, "  "+kind+" "+theme.CardTitle.Render(utils.Truncate(e.IssueTitle, 28)))
+		shown++
+	}
+	if shown == 0 {
+		panel = append(panel, theme.Muted.Render("  No activity this day"))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, grid, "", strings.Join(panel, "\n"))
+}
+
+// dayCell renders one calendar day as a 4-cell: a leading marker column, the
+// day number (two columns), and an activity dot. The selected day shows a cursor
+// marker and is styled, keeping the same visible width.
+func dayCell(day, count int, selected bool) string {
+	dot := " "
+	if count > 0 {
+		dot = "*"
+	}
+	body := fmt.Sprintf("%2d%s", day, dot) // three columns
+	if selected {
+		return theme.CardCursor.Render(">") + theme.CardSelected.Render(body)
+	}
+	return " " + body
+}
+
+// sameDay reports whether a and b fall on the same calendar day.
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
+}
+
+// shortDateTime renders an ISO-8601 timestamp as "2006-01-02 15:04", falling
+// back to the raw string (or its date prefix) when it does not parse.
+func shortDateTime(iso string) string {
+	if t, err := time.Parse(time.RFC3339, iso); err == nil {
+		return t.Format("2006-01-02 15:04")
+	}
+	if len(iso) >= 10 {
+		return iso[:10]
+	}
+	return iso
+}
+
+// eventKindStyle colors an event kind label by its sentiment, reusing the shared
+// status palette so the feed stays consistent with the rest of the board.
+func eventKindStyle(kind string) lipgloss.Style {
+	switch kind {
+	case "Created", "Reopened":
+		return theme.StatusOpen
+	case "Closed":
+		return theme.StatusClosed
+	case "Commented":
+		return theme.StatusMerged
+	default:
+		return theme.Muted
+	}
 }

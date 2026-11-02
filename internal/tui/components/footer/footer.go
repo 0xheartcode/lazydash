@@ -82,7 +82,8 @@ func (m Model) hintBar() string {
 		}
 	case PaneBoard:
 		paneLabel = theme.Title.Render("BOARD") + m.sourceTag()
-		if m.boardLayout == "TABLE_LAYOUT" {
+		switch m.boardLayout {
+		case "TABLE_LAYOUT":
 			paneHints = []string{
 				hint("j/k", "move"),
 				hint("enter", "details"),
@@ -91,7 +92,19 @@ func (m Model) hintBar() string {
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
-		} else {
+		case "ACTIVITY_LAYOUT":
+			paneHints = []string{
+				hint("j/k", "scroll"),
+				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
+				hint("tab", "→ projects"),
+			}
+		case "CALENDAR_LAYOUT":
+			paneHints = []string{
+				hint("h/j/k/l", "day"),
+				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
+				hint("tab", "→ projects"),
+			}
+		default:
 			paneHints = []string{
 				hint("j/k", "item"),
 				hint("h/l", "column"),

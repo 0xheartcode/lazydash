@@ -3,6 +3,7 @@ package sidebar
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/0xheartcode/lazydash/internal/core"
 	"github.com/0xheartcode/lazydash/internal/tui/theme"
@@ -13,6 +14,7 @@ import (
 
 type Model struct {
 	card     *core.Card
+	history  []core.Event // the selected issue's op-log, newest-first
 	viewport viewport.Model
 	width    int
 	height   int
@@ -52,6 +54,15 @@ func (m *Model) SetCard(card *core.Card) {
 	if m.ready && card != nil {
 		m.viewport.SetContent(m.buildContent(m.width - 4))
 		m.viewport.GotoTop()
+	}
+}
+
+// SetHistory loads the selected issue's events, shown as a timeline under the
+// body. Pass them newest-first.
+func (m *Model) SetHistory(events []core.Event) {
+	m.history = events
+	if m.ready && m.card != nil {
+		m.viewport.SetContent(m.buildContent(m.width - 4))
 	}
 }
 
@@ -110,7 +121,7 @@ func (m Model) buildContent(width int) string {
 		lines = append(lines, label("State", stateStyle.Render(strings.ToLower(c.State))))
 	}
 
-	// Notable field values — the local backend's Priority/Milestone trailers and
+	// Notable field values: the local backend's Priority/Milestone trailers and
 	// GitHub custom single-select fields both land in FieldValues.
 	for _, k := range []string{"Priority", "Milestone", "Iteration"} {
 		if v := c.FieldValues[k]; v != "" {
@@ -140,6 +151,23 @@ func (m Model) buildContent(width int) string {
 		lines = append(lines, "")
 		lines = append(lines, strings.Repeat("─", width))
 		lines = append(lines, renderMarkdown(c.Body, width))
+	}
+
+	if len(m.history) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, strings.Repeat("─", width))
+		lines = append(lines, theme.SidebarLabel.Render("History"))
+		for _, e := range m.history {
+			when := e.Date
+			if t, err := time.Parse(time.RFC3339, e.Date); err == nil {
+				when = t.Format("2006-01-02 15:04")
+			}
+			line := theme.Muted.Render(when) + "  " + theme.SidebarValue.Render(e.Kind)
+			if e.Actor != "" {
+				line += " " + theme.Muted.Render("· "+e.Actor)
+			}
+			lines = append(lines, line)
+		}
 	}
 
 	return strings.Join(lines, "\n")

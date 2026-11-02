@@ -1,7 +1,7 @@
 // Package core holds lazydash's backend-neutral domain model: the projects,
 // boards, cards and fields that every source (GitHub Projects, local git issues)
 // maps onto and that the TUI renders. It knows nothing about where the data
-// came from or how it was fetched — that lives in internal/source/*.
+// came from or how it was fetched: that lives in internal/source/*.
 package core
 
 // Project represents a board-bearing project from some source.
@@ -51,7 +51,7 @@ type VisibleField struct {
 	DataType string // TITLE | ASSIGNEES | SINGLE_SELECT | DATE | NUMBER | TEXT | ITERATION | MILESTONE | REPOSITORY | LABELS | LINKED_PULL_REQUESTS
 }
 
-// ProjectView mirrors a saved view — a layout plus its grouping and columns.
+// ProjectView mirrors a saved view: a layout plus its grouping and columns.
 type ProjectView struct {
 	ID            string
 	Name          string
@@ -90,10 +90,22 @@ type RawItem struct {
 	FieldValues map[string]string // field name → selected option name
 }
 
+// Event is one entry in an issue's operation log, derived from a single commit
+// in the issue's git history. The Activity and Calendar board views are built
+// from these.
+type Event struct {
+	IssueID    string // the issue's permanent handle (ref uuid)
+	IssueTitle string // the issue's current folded title
+	Actor      string // who performed the operation
+	Kind       string // friendly label (Created, Commented, Closed, ...)
+	Date       string // ISO-8601 (RFC3339) committer date
+}
+
 // BoardData holds everything fetched from a project in one call.
 // Grouping into columns is done client-side via GroupByField.
 type BoardData struct {
 	Views  []ProjectView
 	Fields []SelectField
 	Items  []RawItem
+	Events []Event // operation log across all issues, newest-first
 }

@@ -16,8 +16,8 @@ func TestBuildBoardSynthesizesFieldsAndGroups(t *testing.T) {
 	if len(bd.Fields) != 2 {
 		t.Fatalf("fields = %d, want 2 (State, Priority)", len(bd.Fields))
 	}
-	if len(bd.Views) != 3 {
-		t.Fatalf("views = %d, want 3", len(bd.Views))
+	if len(bd.Views) != 5 {
+		t.Fatalf("views = %d, want 5 (Board, By Priority, Table, Activity, Calendar)", len(bd.Views))
 	}
 
 	// Grouping by State must yield an open column with A and a closed column with B.

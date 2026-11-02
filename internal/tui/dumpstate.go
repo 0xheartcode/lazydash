@@ -57,6 +57,13 @@ func (m Model) snapshot() map[string]any {
 		b["selected_state"] = sel.State
 		b["selected_status"] = sel.Status
 	}
+	b["events"] = m.board.EventCount()
+	if ev := m.board.SelectedEvent(); ev != nil {
+		b["selected_event"] = ev.IssueTitle
+	}
+	if day := m.board.SelectedDay(); day != "" {
+		b["selected_day"] = day
+	}
 	s["board"] = b
 
 	return s
@@ -94,6 +101,10 @@ func layoutName(layout string) string {
 	switch layout {
 	case "TABLE_LAYOUT":
 		return "table"
+	case "ACTIVITY_LAYOUT":
+		return "activity"
+	case "CALENDAR_LAYOUT":
+		return "calendar"
 	case "BOARD_LAYOUT":
 		return "board"
 	default:

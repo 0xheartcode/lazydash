@@ -47,7 +47,7 @@ func testConfig(t *testing.T) *config.Config {
 func key(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 
 // TestCreateFlowInvokesWriter drives create end to end: press c, type a title,
-// press enter, and run the resulting command — asserting the writer was called.
+// press enter, and run the resulting command, asserting the writer was called.
 func TestCreateFlowInvokesWriter(t *testing.T) {
 	fake := &fakeSource{board: &core.BoardData{Views: []core.ProjectView{{Name: "Board", Layout: "BOARD_LAYOUT"}}}}
 	m := newModel(testConfig(t))
@@ -336,6 +336,71 @@ func TestModalModeTransitions(t *testing.T) {
 	}
 	if s["action"] != "close" {
 		t.Errorf("after toggle state, action = %v, want close", s["action"])
+	}
+}
+
+// eventBoardFixture is the board fixture plus an Activity and a Calendar view and
+// a small op-log, for driving the two new layouts.
+func eventBoardFixture() *core.BoardData {
+	data := boardFixture()
+	data.Views = append(data.Views,
+		core.ProjectView{Name: "Activity", Layout: "ACTIVITY_LAYOUT"},
+		core.ProjectView{Name: "Calendar", Layout: "CALENDAR_LAYOUT"},
+	)
+	data.Events = []core.Event{
+		{IssueID: "1", IssueTitle: "Alpha", Actor: "alice", Kind: "Closed", Date: "2026-01-03T10:00:00Z"},
+		{IssueID: "1", IssueTitle: "Alpha", Actor: "bob", Kind: "Commented", Date: "2026-01-02T10:00:00Z"},
+		{IssueID: "2", IssueTitle: "Bravo", Actor: "alice", Kind: "Created", Date: "2026-01-01T10:00:00Z"},
+	}
+	return data
+}
+
+// TestCycleToActivityAndCalendar loads a board carrying the Activity and Calendar
+// views, cycles the view with "]", and asserts the snapshot view name and the
+// event count exposed by the seam.
+func TestCycleToActivityAndCalendar(t *testing.T) {
+	fake := &fakeSource{board: eventBoardFixture()}
+	m := newModel(testConfig(t))
+	m.registry = source.NewRegistry(fake)
+	m.activeProject = core.Project{ID: "p1", Source: "fake"}
+
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = upd.(Model)
+	upd, _ = m.Update(boardLoadedMsg{data: fake.board})
+	m = upd.(Model)
+
+	if got := m.snapshot()["view"]; got != "board" {
+		t.Fatalf("initial view = %v, want board", got)
+	}
+
+	// Next view -> Activity.
+	upd, _ = m.Update(key("]"))
+	m = upd.(Model)
+	s := m.snapshot()
+	if s["view"] != "activity" {
+		t.Errorf("after one ], view = %v, want activity", s["view"])
+	}
+	b := subMap(t, s, "board")
+	if b["events"] != 3 {
+		t.Errorf("board.events = %v, want 3", b["events"])
+	}
+	if b["selected_event"] != "Alpha" {
+		t.Errorf("board.selected_event = %v, want Alpha", b["selected_event"])
+	}
+
+	// Next view -> Calendar.
+	upd, _ = m.Update(key("]"))
+	m = upd.(Model)
+	s = m.snapshot()
+	if s["view"] != "calendar" {
+		t.Errorf("after two ], view = %v, want calendar", s["view"])
+	}
+	b = subMap(t, s, "board")
+	if b["events"] != 3 {
+		t.Errorf("board.events = %v, want 3", b["events"])
+	}
+	if b["selected_day"] != "2026-01-03" {
+		t.Errorf("board.selected_day = %v, want 2026-01-03", b["selected_day"])
 	}
 }
 

@@ -26,9 +26,12 @@ func (m *Model) applyView(idx int) {
 	m.board.SetOptionColors(core.OptionColors(m.boardData))
 	m.footer.SetBoardLayout(view.Layout)
 
-	if view.Layout == "TABLE_LAYOUT" || view.Layout == "ROADMAP_LAYOUT" {
+	switch view.Layout {
+	case "TABLE_LAYOUT", "ROADMAP_LAYOUT":
 		m.board.SetTableItems(core.FlatItems(m.boardData))
-	} else {
+	case "ACTIVITY_LAYOUT", "CALENDAR_LAYOUT":
+		m.board.SetEvents(m.boardData.Events)
+	default:
 		fieldName := view.GroupByField
 		if fieldName == "" {
 			fieldName = "Status"
@@ -183,6 +186,7 @@ func (m Model) handleBoardKey(k string) (tea.Model, tea.Cmd) {
 	case m.keys.Enter:
 		if card := m.board.SelectedCard(); card != nil {
 			m.sidebar.SetCard(card)
+			m.sidebar.SetHistory(m.issueHistory(card.ID))
 			m.sidebar.SetActive(true)
 			m.showDetails = true
 		}
@@ -215,7 +219,7 @@ func (m *Model) openURL(card *core.Card) {
 		return
 	}
 	if card.URL == "" {
-		m.setStatus("no URL — draft issues cannot be opened in browser")
+		m.setStatus("no URL, draft issues cannot be opened in browser")
 		return
 	}
 	_ = utils.OpenInBrowser(card.URL)
@@ -232,7 +236,7 @@ func (m *Model) openGhDash(card *core.Card) {
 		return
 	}
 	if !launched {
-		m.setStatus("gh-dash not found — opening in browser. Install: " + utils.GhDashInstallHint())
+		m.setStatus("gh-dash not found, opening in browser. Install: " + utils.GhDashInstallHint())
 	}
 }
 

@@ -71,7 +71,19 @@ func (s *Source) GetBoard(string) (*core.BoardData, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buildBoard(issues), nil
+	board := buildBoard(issues)
+
+	// The Activity and Calendar views read the raw git op-log directly, keyed to
+	// the folded titles we already have. A failure here is non-fatal: the board
+	// still renders, those two views are just empty.
+	titles := make(map[string]string, len(issues))
+	for _, iss := range issues {
+		titles[iss.ID] = iss.Title
+	}
+	if events, err := ListEvents(s.root, titles); err == nil {
+		board.Events = events
+	}
+	return board, nil
 }
 
 // listIssues folds the repo's issues through gli when it is available, and
@@ -104,6 +116,8 @@ func buildBoard(issues []Issue) *core.BoardData {
 		{Name: "Board", Layout: "BOARD_LAYOUT", GroupByField: "State", VisibleFields: tableFields()},
 		{Name: "By Priority", Layout: "BOARD_LAYOUT", GroupByField: "Priority", VisibleFields: tableFields()},
 		{Name: "Table", Layout: "TABLE_LAYOUT", VisibleFields: tableFields()},
+		{Name: "Activity", Layout: "ACTIVITY_LAYOUT"},
+		{Name: "Calendar", Layout: "CALENDAR_LAYOUT"},
 	}
 
 	items := make([]core.RawItem, 0, len(issues))
