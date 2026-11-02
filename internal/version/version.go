@@ -3,4 +3,4 @@ package version
 
 // Version is the current lazydash version. It is a var so a release build can
 // override it with -ldflags "-X .../internal/version.Version=...".
-var Version = "v0.2.1"
+var Version = "v0.2.2"
