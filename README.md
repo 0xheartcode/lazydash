@@ -82,6 +82,9 @@ go build -o lazydash .
 lazydash                                    # browse GitHub Projects + this repo's local issues
 lazydash --config ~/.config/lazydash/config.yml
 lazydash version                            # print the version
+lazydash add-repo [path]                    # also show another repo's local issues (default: .)
+lazydash rm-repo [path]                     # stop showing a repo (default: .)
+lazydash repos                              # list the repos you have registered
 ```
 
 Run it **inside a repository** to work with that repo's local issues offline. The
@@ -90,6 +93,23 @@ command-line tool (`gli`) for correct reading and for all writes (create, commen
 close, label, assign), with issues stored as git commits under `refs/issues/`. When
 `gli` is not installed, lazydash falls back to reading issues directly from git, so
 you can still view them without it.
+
+### Multiple repos
+
+The GitHub side is already account-wide; the local side can span several repos
+too. Register them once and each shows up as its own board in the project list,
+alongside the current directory:
+
+```bash
+cd ~/code/project-a && lazydash add-repo    # register the current repo
+lazydash add-repo ~/code/project-b          # or register one by path
+```
+
+`add-repo` writes to its own `~/.config/lazydash/repos.json`, so it never rewrites
+your hand-edited `config.yml`. You can also list repos declaratively with the
+`repos` config key below. The effective set is the current directory plus the
+config list plus the registered list, deduplicated, with the current repo first.
+Only issues are shown across repos, never code history or push state.
 
 ## Keybindings
 
@@ -100,7 +120,7 @@ you can still view them without it.
 | `tab` / `shift+tab` | Next / previous pane |
 | `enter` | Load project · open card details |
 | `esc` | Close details / cancel a modal |
-| `[` / `]` | Cycle project views (Board, By Priority, Table, Activity, Calendar) |
+| `[` / `]` | Cycle project views (Board, By Priority, Table, Activity, Calendar, Roadmap) |
 | `o` | Open in browser |
 | `d` | Open in gh-dash |
 | `p` | Open the full issue in a pager (bat, else $PAGER, else less) |
@@ -109,7 +129,7 @@ you can still view them without it.
 | `q` | Quit |
 
 In the Calendar view, `h` / `j` / `k` / `l` move the selected day; in the
-Activity view, `j` / `k` scroll the feed.
+Activity and Roadmap views, `j` / `k` move between entries.
 
 Write actions (shown only for writable sources, gated per backend capability):
 
@@ -126,6 +146,10 @@ Write actions (shown only for writable sources, gated per backend capability):
 
 - **Two backends, one UI.** Browse and edit GitHub Projects and local git-native
   issues from the same board and table views, switchable with `[` / `]`.
+- **Multi-repo local view.** Register several repositories with `lazydash add-repo`
+  (or the `repos` config key) and each appears as its own board in the project
+  list, so you can browse the issues of all your projects without leaving the
+  terminal. Issues only, never code history or push state.
 - **Styled Markdown detail panel.** Issue descriptions and bodies render as
   styled Markdown in the detail panel, and `p` opens the full issue in an
   external pager (bat, else `$PAGER`, else less). The detail panel also shows
@@ -143,8 +167,9 @@ Write actions (shown only for writable sources, gated per backend capability):
   browsable (read-only) when you're offline.
 - **Live GitHub views.** GitHub boards and tables are fetched live from the
   Projects API, so the TUI matches the browser.
-- **Planned: roadmap view.** A roadmap (timeline-by-date) view is planned for a
-  later release.
+- **Roadmap view.** A GitHub project's roadmap view renders as a horizontal
+  timeline, placing items on a time axis by their date fields (a bar from start
+  to target date, or a marker for a single date).
 
 ## Config
 
@@ -163,6 +188,7 @@ defaults:
   ignoreOrgs: []                 # orgs to hide e.g. ["myorg"]
   onlyProjects: []               # if set, show only these projects
   onlyOrgs: []                   # if set, use only these orgs
+  repos: []                      # extra local repo paths to show beyond the current dir; ~ is expanded
   refreshIntervalMinutes: 5
 
 keybindings:

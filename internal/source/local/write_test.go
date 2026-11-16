@@ -27,7 +27,7 @@ func gliSource(t *testing.T) *Source {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gli init: %v\n%s", err, out)
 	}
-	return &Source{root: dir, name: "x", writable: true}
+	return &Source{repos: []repo{{root: dir, name: "x"}}, writable: true}
 }
 
 func TestGliCreateCommentClose(t *testing.T) {
@@ -156,7 +156,7 @@ func TestGliCommentMissingIssue(t *testing.T) {
 // onlyIssue reads the single issue in the repo through the gli reader.
 func onlyIssue(t *testing.T, s *Source) Issue {
 	t.Helper()
-	issues, err := ListIssuesGli(s.root)
+	issues, err := ListIssuesGli(s.repos[0].root)
 	if err != nil {
 		t.Fatalf("ListIssuesGli: %v", err)
 	}

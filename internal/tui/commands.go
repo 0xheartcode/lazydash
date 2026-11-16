@@ -8,6 +8,7 @@ import (
 	"github.com/0xheartcode/lazydash/internal/cache"
 	"github.com/0xheartcode/lazydash/internal/config"
 	"github.com/0xheartcode/lazydash/internal/core"
+	"github.com/0xheartcode/lazydash/internal/repostore"
 	"github.com/0xheartcode/lazydash/internal/source"
 	"github.com/0xheartcode/lazydash/internal/source/github"
 	"github.com/0xheartcode/lazydash/internal/source/local"
@@ -37,7 +38,13 @@ func initSourcesCmd(cfg *config.Config) tea.Cmd {
 		}
 
 		if sourceEnabled(cfg, "local") {
-			if loc, err := local.New("."); err == nil && loc != nil {
+			// Extra repos come from the declarative config and the add-repo
+			// registry; the current directory is always included by NewMulti.
+			extra := append([]string{}, cfg.Defaults.Repos...)
+			if reg, err := repostore.Load(); err == nil {
+				extra = append(extra, reg...)
+			}
+			if loc, err := local.NewMulti(".", extra); err == nil && loc != nil {
 				sources = append(sources, loc)
 			}
 		}
@@ -46,7 +53,7 @@ func initSourcesCmd(cfg *config.Config) tea.Cmd {
 			if firstErr != nil {
 				return errMsg{firstErr}
 			}
-			return errMsg{fmt.Errorf("no sources available — run `gh auth login`, or launch inside a repo with local issues")}
+			return errMsg{fmt.Errorf("no sources available: run `gh auth login`, or launch inside a repo with local issues")}
 		}
 		return sourcesReadyMsg{registry: source.NewRegistry(sources...)}
 	}

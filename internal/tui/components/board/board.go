@@ -36,6 +36,14 @@ type Model struct {
 	events      []core.Event
 	eventCursor int
 	calCursor   time.Time // selected day in the calendar grid
+
+	// roadmap mode
+	roadmapCards      []core.Card // dated items first, then undated, in source order within each group
+	roadmapStart      string      // name of the start date field ("" if none)
+	roadmapTarget     string      // name of the target/end date field ("" if none)
+	roadmapDatedCount int         // how many leading roadmapCards carry a usable date
+	roadmapRow        int         // selected row across the whole item list
+	roadmapScroll     int         // first visible row
 }
 
 func New() Model { return Model{layout: "BOARD_LAYOUT"} }
@@ -76,6 +84,28 @@ func (m *Model) SetEvents(events []core.Event) {
 	}
 }
 
+// SetRoadmap loads the roadmap view with its flat item list and the names of the
+// view's date fields. When two date fields are present, startField is the start
+// date and targetField is the target/end date; when one is present it is a single
+// marker date. Items are ordered dated-first (in source order), then the undated
+// items, so the row cursor and the No-date section stay in step.
+func (m *Model) SetRoadmap(cards []core.Card, startField, targetField string) {
+	m.roadmapStart = startField
+	m.roadmapTarget = targetField
+	var dated, undated []core.Card
+	for _, c := range cards {
+		if m.hasRoadmapDate(c) {
+			dated = append(dated, c)
+		} else {
+			undated = append(undated, c)
+		}
+	}
+	m.roadmapCards = append(dated, undated...)
+	m.roadmapDatedCount = len(dated)
+	m.roadmapRow = 0
+	m.roadmapScroll = 0
+}
+
 // --- Navigation ---
 
 func (m *Model) MoveUp() {
@@ -95,6 +125,14 @@ func (m *Model) MoveUp() {
 		return
 	case "CALENDAR_LAYOUT":
 		m.calCursor = m.calCursor.AddDate(0, 0, -7)
+		return
+	case "ROADMAP_LAYOUT":
+		if m.roadmapRow > 0 {
+			m.roadmapRow--
+			if m.roadmapRow < m.roadmapScroll {
+				m.roadmapScroll = m.roadmapRow
+			}
+		}
 		return
 	}
 	if m.cardIdx > 0 {
@@ -121,6 +159,15 @@ func (m *Model) MoveDown() {
 	case "CALENDAR_LAYOUT":
 		m.calCursor = m.calCursor.AddDate(0, 0, 7)
 		return
+	case "ROADMAP_LAYOUT":
+		if m.roadmapRow < len(m.roadmapCards)-1 {
+			m.roadmapRow++
+			visible := m.roadmapVisibleRows()
+			if m.roadmapRow >= m.roadmapScroll+visible {
+				m.roadmapScroll = m.roadmapRow - visible + 1
+			}
+		}
+		return
 	}
 	if len(m.columns) == 0 {
 		return
@@ -133,7 +180,9 @@ func (m *Model) MoveDown() {
 
 func (m *Model) MoveLeft() {
 	switch m.layout {
-	case "TABLE_LAYOUT", "ACTIVITY_LAYOUT":
+	case "TABLE_LAYOUT", "ACTIVITY_LAYOUT", "ROADMAP_LAYOUT":
+		// Roadmap auto-fits the whole date range to the width, so there is
+		// nothing to pan horizontally.
 		return
 	case "CALENDAR_LAYOUT":
 		m.calCursor = m.calCursor.AddDate(0, 0, -1)
@@ -147,7 +196,7 @@ func (m *Model) MoveLeft() {
 
 func (m *Model) MoveRight() {
 	switch m.layout {
-	case "TABLE_LAYOUT", "ACTIVITY_LAYOUT":
+	case "TABLE_LAYOUT", "ACTIVITY_LAYOUT", "ROADMAP_LAYOUT":
 		return
 	case "CALENDAR_LAYOUT":
 		m.calCursor = m.calCursor.AddDate(0, 0, 1)
@@ -167,6 +216,9 @@ func (m Model) Layout() string { return m.layout }
 func (m Model) Counts() (columns, cards int) {
 	if m.layout == "TABLE_LAYOUT" {
 		return 0, len(m.tableItems)
+	}
+	if m.layout == "ROADMAP_LAYOUT" {
+		return 0, len(m.roadmapCards)
 	}
 	for _, c := range m.columns {
 		cards += len(c.Cards)
@@ -199,12 +251,36 @@ func (m Model) SelectedDay() string {
 	return m.calCursor.Format("2006-01-02")
 }
 
+// RoadmapCount reports how many items are on the roadmap, for the snapshot seam.
+func (m Model) RoadmapCount() int { return len(m.roadmapCards) }
+
+// RoadmapUndatedCount reports how many roadmap items have no usable date and so
+// land in the No-date section, for the snapshot seam.
+func (m Model) RoadmapUndatedCount() int { return len(m.roadmapCards) - m.roadmapDatedCount }
+
+// RoadmapWindow returns the roadmap's time axis as start and end months
+// (YYYY-MM), or two empty strings when no item carries a usable date.
+func (m Model) RoadmapWindow() (start, end string) {
+	min, max, ok := m.roadmapRange()
+	if !ok {
+		return "", ""
+	}
+	return min.Format("2006-01"), max.Format("2006-01")
+}
+
 func (m Model) SelectedCard() *core.Card {
 	if m.layout == "TABLE_LAYOUT" {
 		if len(m.tableItems) == 0 || m.tableRow >= len(m.tableItems) {
 			return nil
 		}
 		c := m.tableItems[m.tableRow]
+		return &c
+	}
+	if m.layout == "ROADMAP_LAYOUT" {
+		if len(m.roadmapCards) == 0 || m.roadmapRow < 0 || m.roadmapRow >= len(m.roadmapCards) {
+			return nil
+		}
+		c := m.roadmapCards[m.roadmapRow]
 		return &c
 	}
 	if len(m.columns) == 0 {
@@ -236,6 +312,8 @@ func (m Model) View() string {
 		content = m.renderActivity(innerW, innerH)
 	case "CALENDAR_LAYOUT":
 		content = m.renderCalendar(innerW, innerH)
+	case "ROADMAP_LAYOUT":
+		content = m.renderRoadmap(innerW, innerH)
 	default:
 		content = m.renderBoard(innerW, innerH)
 	}
@@ -771,4 +849,231 @@ func eventKindStyle(kind string) lipgloss.Style {
 	default:
 		return theme.Muted
 	}
+}
+
+// --- Roadmap rendering ---
+
+// roadmapDate parses the ISO date ("2006-01-02") held in a card's named field,
+// reporting whether the value was present and parseable.
+func (m Model) roadmapDate(c core.Card, field string) (time.Time, bool) {
+	if field == "" || c.FieldValues == nil {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02", c.FieldValues[field])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// hasRoadmapDate reports whether a card carries any usable roadmap date, so it
+// can be placed on the timeline rather than listed in the No-date section.
+func (m Model) hasRoadmapDate(c core.Card) bool {
+	_, s := m.roadmapDate(c, m.roadmapStart)
+	_, e := m.roadmapDate(c, m.roadmapTarget)
+	return s || e
+}
+
+// roadmapRange returns the earliest start and latest target across all dated
+// items, reporting false when nothing is dated. A zero-width span is widened by
+// one day so the axis never collapses.
+func (m Model) roadmapRange() (min, max time.Time, ok bool) {
+	for i := 0; i < m.roadmapDatedCount && i < len(m.roadmapCards); i++ {
+		c := m.roadmapCards[i]
+		for _, field := range []string{m.roadmapStart, m.roadmapTarget} {
+			t, has := m.roadmapDate(c, field)
+			if !has {
+				continue
+			}
+			if !ok {
+				min, max, ok = t, t, true
+				continue
+			}
+			if t.Before(min) {
+				min = t
+			}
+			if t.After(max) {
+				max = t
+			}
+		}
+	}
+	if ok && !max.After(min) {
+		max = min.AddDate(0, 0, 1)
+	}
+	return min, max, ok
+}
+
+// roadmapVisibleRows is the number of item rows that fit under the roadmap's
+// tab bar, month header and axis separator.
+func (m Model) roadmapVisibleRows() int {
+	h := m.height - 2 - 3 // border + tab bar + month header + separator
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// scaleCol maps a time onto a zero-based column in a bar of the given width,
+// clamped to the bar's bounds.
+func scaleCol(t, min, max time.Time, width int) int {
+	if width <= 1 {
+		return 0
+	}
+	span := max.Sub(min)
+	if span <= 0 {
+		return 0
+	}
+	c := int(float64(t.Sub(min)) / float64(span) * float64(width-1))
+	if c < 0 {
+		return 0
+	}
+	if c > width-1 {
+		return width - 1
+	}
+	return c
+}
+
+// placeInto writes s into row starting at col, ignoring anything out of bounds.
+func placeInto(row []rune, col int, s string) {
+	for i, r := range []rune(s) {
+		p := col + i
+		if p < 0 || p >= len(row) {
+			continue
+		}
+		row[p] = r
+	}
+}
+
+// renderRoadmap draws a horizontal timeline: a left title column per item and a
+// bar spanning its start to its target date, with a month-labelled axis scaled
+// to fit the whole range into the available width. Items with no usable date are
+// listed in a No-date section at the bottom.
+func (m Model) renderRoadmap(innerW, innerH int) string {
+	tabBar := m.renderTabBar(innerW)
+
+	if len(m.roadmapCards) == 0 {
+		return strings.Join([]string{tabBar, "", theme.Muted.Render("  No items")}, "\n")
+	}
+
+	const cursorW, iconW = 2, 2
+	titleW := innerW / 3
+	if titleW < 8 {
+		titleW = 8
+	}
+	if titleW > 30 {
+		titleW = 30
+	}
+	barWidth := innerW - cursorW - iconW - titleW - 1
+	if barWidth < 1 {
+		barWidth = 1
+	}
+
+	min, max, dated := m.roadmapRange()
+	lines := []string{tabBar}
+
+	// Month-labelled header and axis separator, aligned over the bar area.
+	leftPad := strings.Repeat(" ", cursorW+iconW+titleW+1)
+	if dated {
+		header := make([]rune, barWidth)
+		for i := range header {
+			header[i] = ' '
+		}
+		mt := time.Date(min.Year(), min.Month(), 1, 0, 0, 0, 0, min.Location())
+		for !mt.After(max) {
+			label := mt.Format("Jan")
+			if mt.Month() == time.January {
+				label = mt.Format("Jan 06")
+			}
+			placeInto(header, scaleCol(mt, min, max, barWidth), label)
+			mt = mt.AddDate(0, 1, 0)
+		}
+		lines = append(lines, leftPad+theme.Subtitle.Render(string(header)))
+	} else {
+		lines = append(lines, theme.Muted.Render("  No dated items to place on the timeline"))
+	}
+	lines = append(lines, theme.Muted.Render(strings.Repeat("─", innerW)))
+
+	headerLines := len(lines)
+	visible := innerH - headerLines
+	if visible < 1 {
+		visible = 1
+	}
+	if m.roadmapScroll > len(m.roadmapCards)-1 {
+		m.roadmapScroll = 0
+	}
+	end := m.roadmapScroll + visible
+	if end > len(m.roadmapCards) {
+		end = len(m.roadmapCards)
+	}
+
+	for i := m.roadmapScroll; i < end; i++ {
+		card := m.roadmapCards[i]
+		if i == m.roadmapDatedCount {
+			lines = append(lines, theme.Subtitle.Render("No date"))
+		}
+
+		cursor := "  "
+		title := utils.Truncate(card.Title, titleW)
+		titleStr := theme.CardTitle.Width(titleW).Render(title)
+		if i == m.roadmapRow {
+			cursor = theme.CardCursor.Render("> ")
+			titleStr = theme.CardSelected.Width(titleW).Render(title)
+		}
+		icon := itemIcon(card.Type, card.State)
+
+		bar := m.roadmapBar(card, min, max, barWidth, i == m.roadmapRow, dated)
+		lines = append(lines, cursor+icon+titleStr+" "+bar)
+	}
+
+	if len(m.roadmapCards) > visible {
+		pct := 0
+		if len(m.roadmapCards) > 1 {
+			pct = m.roadmapRow * 100 / (len(m.roadmapCards) - 1)
+		}
+		lines = append(lines, theme.Muted.Render(fmt.Sprintf("  %d/%d (%d%%)", m.roadmapRow+1, len(m.roadmapCards), pct)))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// roadmapBar renders one item's bar over the shared axis: a span from start to
+// target, a single marker glyph when only one date is present, or blanks when
+// the item is undated.
+func (m Model) roadmapBar(card core.Card, min, max time.Time, width int, selected, dated bool) string {
+	row := make([]rune, width)
+	for i := range row {
+		row[i] = ' '
+	}
+	if !dated {
+		return string(row)
+	}
+
+	start, hasStart := m.roadmapDate(card, m.roadmapStart)
+	endT, hasEnd := m.roadmapDate(card, m.roadmapTarget)
+
+	switch {
+	case hasStart && hasEnd:
+		sc := scaleCol(start, min, max, width)
+		ec := scaleCol(endT, min, max, width)
+		if ec < sc {
+			sc, ec = ec, sc
+		}
+		for c := sc; c <= ec && c < width; c++ {
+			row[c] = '━'
+		}
+		row[sc] = '┝'
+		if ec < width {
+			row[ec] = '┥'
+		}
+	case hasStart:
+		row[scaleCol(start, min, max, width)] = '◆'
+	case hasEnd:
+		row[scaleCol(endT, min, max, width)] = '◆'
+	}
+
+	style := lipgloss.NewStyle().Foreground(theme.ColorPrimary)
+	if selected {
+		style = lipgloss.NewStyle().Foreground(theme.ColorSecondary)
+	}
+	return style.Render(string(row))
 }

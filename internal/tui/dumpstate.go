@@ -64,6 +64,14 @@ func (m Model) snapshot() map[string]any {
 	if day := m.board.SelectedDay(); day != "" {
 		b["selected_day"] = day
 	}
+	if m.board.Layout() == "ROADMAP_LAYOUT" {
+		b["roadmap_items"] = m.board.RoadmapCount()
+		b["roadmap_undated"] = m.board.RoadmapUndatedCount()
+		if start, end := m.board.RoadmapWindow(); start != "" {
+			b["roadmap_start"] = start
+			b["roadmap_end"] = end
+		}
+	}
 	s["board"] = b
 
 	return s
@@ -105,6 +113,8 @@ func layoutName(layout string) string {
 		return "activity"
 	case "CALENDAR_LAYOUT":
 		return "calendar"
+	case "ROADMAP_LAYOUT":
+		return "roadmap"
 	case "BOARD_LAYOUT":
 		return "board"
 	default:

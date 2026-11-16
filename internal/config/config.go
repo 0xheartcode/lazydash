@@ -23,6 +23,11 @@ type Defaults struct {
 	// auto-detect both (GitHub when gh is authenticated, local when the current
 	// repository has git-native issues).
 	Sources []string `yaml:"sources"`
+	// Repos lists extra local repository paths to show beyond the current
+	// directory, so the local backend spans several repos. Paths may use ~. This
+	// is the declarative, hand-edited base; `lazydash add-repo` adds more at
+	// runtime without touching this file.
+	Repos []string `yaml:"repos"`
 }
 
 type Keybindings struct {

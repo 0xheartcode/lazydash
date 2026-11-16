@@ -23,7 +23,11 @@ var (
 // CreateIssue mints a new issue with `gli create` and returns a card keyed by the
 // short id gli prints. The board is reloaded after any write, so the exact handle
 // on the returned card is not load-bearing beyond Title and State.
-func (s *Source) CreateIssue(_ string, d source.Draft) (core.Card, error) {
+func (s *Source) CreateIssue(projectID string, d source.Draft) (core.Card, error) {
+	root := s.rootFor(projectID)
+	if root == "" {
+		return core.Card{}, fmt.Errorf("local: unknown project %q", projectID)
+	}
 	title := strings.TrimSpace(d.Title)
 	if title == "" {
 		return core.Card{}, fmt.Errorf("issue title is required")
@@ -53,14 +57,14 @@ func (s *Source) CreateIssue(_ string, d source.Draft) (core.Card, error) {
 		}
 	}
 
-	out, err := gli(s.root, args...)
+	out, err := gli(root, args...)
 	if err != nil {
 		return core.Card{}, err
 	}
 	id := strings.TrimSpace(out)
 
 	for _, a := range extraAssignees {
-		if _, err := gli(s.root, "edit", id, "--add-assignee", a); err != nil {
+		if _, err := gli(root, "edit", id, "--add-assignee", a); err != nil {
 			return core.Card{}, err
 		}
 	}
@@ -77,7 +81,7 @@ func (s *Source) Comment(item core.Card, body string) error {
 	if err != nil {
 		return err
 	}
-	_, err = gli(s.root, "comment", id, body)
+	_, err = gli(s.rootForCard(item), "comment", id, body)
 	return err
 }
 
@@ -91,7 +95,7 @@ func (s *Source) SetState(item core.Card, state string) error {
 	if strings.EqualFold(strings.TrimSpace(state), "closed") {
 		verb = "close"
 	}
-	_, err = gli(s.root, verb, id)
+	_, err = gli(s.rootForCard(item), verb, id)
 	return err
 }
 
@@ -107,7 +111,7 @@ func (s *Source) SetField(item core.Card, field, option string) error {
 		if err != nil {
 			return err
 		}
-		_, err = gli(s.root, "edit", id, "-p", option)
+		_, err = gli(s.rootForCard(item), "edit", id, "-p", option)
 		return err
 	default:
 		return nil
@@ -137,7 +141,7 @@ func (s *Source) SetLabels(item core.Card, labels []string) error {
 	if len(args) == 0 {
 		return nil
 	}
-	_, err = gli(s.root, append([]string{"edit", id}, args...)...)
+	_, err = gli(s.rootForCard(item), append([]string{"edit", id}, args...)...)
 	return err
 }
 
@@ -160,7 +164,7 @@ func (s *Source) SetAssignees(item core.Card, who []string) error {
 	if len(args) == 0 {
 		return nil
 	}
-	_, err = gli(s.root, append([]string{"edit", id}, args...)...)
+	_, err = gli(s.rootForCard(item), append([]string{"edit", id}, args...)...)
 	return err
 }
 

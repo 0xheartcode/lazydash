@@ -404,6 +404,76 @@ func TestCycleToActivityAndCalendar(t *testing.T) {
 	}
 }
 
+// roadmapBoardFixture carries a Board view and a Roadmap view with two DATE
+// visible fields, and items whose FieldValues hold those dates (one item has
+// none, so it belongs in the No-date section).
+func roadmapBoardFixture() *core.BoardData {
+	return &core.BoardData{
+		Views: []core.ProjectView{
+			{Name: "Board", Layout: "BOARD_LAYOUT", GroupByField: "Status"},
+			{Name: "Roadmap", Layout: "ROADMAP_LAYOUT", VisibleFields: []core.VisibleField{
+				{Name: "Title", DataType: "TITLE"},
+				{Name: "Start", DataType: "DATE"},
+				{Name: "Target", DataType: "DATE"},
+			}},
+		},
+		Items: []core.RawItem{
+			{ID: "1", Type: "ISSUE", Number: 1, Title: "Alpha", State: "open",
+				FieldValues: map[string]string{"Start": "2026-01-05", "Target": "2026-02-10"}},
+			{ID: "2", Type: "ISSUE", Number: 2, Title: "Bravo", State: "open",
+				FieldValues: map[string]string{"Start": "2026-03-01", "Target": "2026-05-20"}},
+			{ID: "3", Type: "ISSUE", Number: 3, Title: "Charlie", State: "open",
+				FieldValues: map[string]string{}},
+		},
+	}
+}
+
+// TestCycleToRoadmap loads a board carrying a Roadmap view, cycles to it with
+// "]", and asserts the snapshot view name, item count, undated count, time
+// window and selected title exposed by the seam.
+func TestCycleToRoadmap(t *testing.T) {
+	fake := &fakeSource{board: roadmapBoardFixture()}
+	m := newModel(testConfig(t))
+	m.registry = source.NewRegistry(fake)
+	m.activeProject = core.Project{ID: "p1", Source: "fake"}
+
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = upd.(Model)
+	upd, _ = m.Update(boardLoadedMsg{data: fake.board})
+	m = upd.(Model)
+
+	if got := m.snapshot()["view"]; got != "board" {
+		t.Fatalf("initial view = %v, want board", got)
+	}
+
+	upd, _ = m.Update(key("]"))
+	m = upd.(Model)
+	s := m.snapshot()
+	if s["view"] != "roadmap" {
+		t.Fatalf("after ], view = %v, want roadmap", s["view"])
+	}
+	b := subMap(t, s, "board")
+	if b["roadmap_items"] != 3 {
+		t.Errorf("board.roadmap_items = %v, want 3", b["roadmap_items"])
+	}
+	if b["roadmap_undated"] != 1 {
+		t.Errorf("board.roadmap_undated = %v, want 1", b["roadmap_undated"])
+	}
+	if b["roadmap_start"] != "2026-01" || b["roadmap_end"] != "2026-05" {
+		t.Errorf("board.roadmap window = %v..%v, want 2026-01..2026-05", b["roadmap_start"], b["roadmap_end"])
+	}
+	if b["selected_title"] != "Alpha" {
+		t.Errorf("board.selected_title = %v, want Alpha", b["selected_title"])
+	}
+
+	// j moves the row cursor to the next dated item.
+	upd, _ = m.Update(key("j"))
+	m = upd.(Model)
+	if got := subMap(t, m.snapshot(), "board")["selected_title"]; got != "Bravo" {
+		t.Errorf("after j, selected_title = %v, want Bravo", got)
+	}
+}
+
 func TestViewTooSmallShowsPrompt(t *testing.T) {
 	m := newModel(testConfig(t))
 

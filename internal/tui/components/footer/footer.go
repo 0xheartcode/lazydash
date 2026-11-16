@@ -104,6 +104,14 @@ func (m Model) hintBar() string {
 				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
 				hint("tab", "→ projects"),
 			}
+		case "ROADMAP_LAYOUT":
+			paneHints = []string{
+				hint("j/k", "item"),
+				hint("enter", "details"),
+				hint(m.keys.OpenInBrowser, "browser"),
+				hint(m.keys.PrevView+"/"+m.keys.NextView, "views"),
+				hint("tab", "→ projects"),
+			}
 		default:
 			paneHints = []string{
 				hint("j/k", "item"),

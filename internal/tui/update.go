@@ -27,8 +27,11 @@ func (m *Model) applyView(idx int) {
 	m.footer.SetBoardLayout(view.Layout)
 
 	switch view.Layout {
-	case "TABLE_LAYOUT", "ROADMAP_LAYOUT":
+	case "TABLE_LAYOUT":
 		m.board.SetTableItems(core.FlatItems(m.boardData))
+	case "ROADMAP_LAYOUT":
+		start, target := roadmapDateFields(view.VisibleFields)
+		m.board.SetRoadmap(core.FlatItems(m.boardData), start, target)
 	case "ACTIVITY_LAYOUT", "CALENDAR_LAYOUT":
 		m.board.SetEvents(m.boardData.Events)
 	default:
@@ -37,6 +40,27 @@ func (m *Model) applyView(idx int) {
 			fieldName = "Status"
 		}
 		m.board.SetColumns(core.GroupByField(m.boardData, fieldName))
+	}
+}
+
+// roadmapDateFields picks the roadmap view's date fields from its visible fields,
+// in declared order. The first DATE field is the start date and the second is the
+// target/end date. With a single DATE field, it is returned as the start (marker)
+// date and the target is empty.
+func roadmapDateFields(fields []core.VisibleField) (start, target string) {
+	var dates []string
+	for _, vf := range fields {
+		if vf.DataType == "DATE" {
+			dates = append(dates, vf.Name)
+		}
+	}
+	switch {
+	case len(dates) >= 2:
+		return dates[0], dates[1]
+	case len(dates) == 1:
+		return dates[0], ""
+	default:
+		return "", ""
 	}
 }
 
